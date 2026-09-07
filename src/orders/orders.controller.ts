@@ -53,6 +53,30 @@ export class OrdersController {
     return this.ordersService.listMtm({ instIds: parsed });
   }
 
+  @Get('staking')
+  staking(@Query('instIds') instIds?: string | string[]) {
+    const parsed = Array.isArray(instIds)
+      ? instIds.flatMap((value) => value.split(','))
+      : (instIds || '')
+          .split(',')
+          .map((value) => value.trim())
+          .filter(Boolean);
+
+    return this.ordersService.listStaking({ instIds: parsed });
+  }
+
+  @Get('staking/mtm')
+  stakingMtm(@Query('instIds') instIds?: string | string[]) {
+    const parsed = Array.isArray(instIds)
+      ? instIds.flatMap((value) => value.split(','))
+      : (instIds || '')
+          .split(',')
+          .map((value) => value.trim())
+          .filter(Boolean);
+
+    return this.ordersService.listStakingMtm({ instIds: parsed });
+  }
+
   @Post('link')
   link(@Body() dto: LinkOrdersDto) {
     return this.ordersService.link(dto.sellOrderId, dto.buyOrderId);
@@ -71,6 +95,16 @@ export class OrdersController {
   @Post(':id/unarchive')
   unarchive(@Param('id', ParseIntPipe) id: number) {
     return this.ordersService.unarchive(id);
+  }
+
+  @Post(':id/stake')
+  stake(@Param('id', ParseIntPipe) id: number) {
+    return this.ordersService.stake(id);
+  }
+
+  @Post(':id/unstake')
+  unstake(@Param('id', ParseIntPipe) id: number) {
+    return this.ordersService.unstake(id);
   }
 
   @Get()

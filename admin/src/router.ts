@@ -4,12 +4,14 @@ import DealsView from './views/DealsView.vue'
 import LoginView from './views/LoginView.vue'
 import OrdersView from './views/OrdersView.vue'
 import SettingsView from './views/SettingsView.vue'
+import StakingView from './views/StakingView.vue'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
     { path: '/', name: 'orders', component: OrdersView },
+    { path: '/staking', name: 'staking', component: StakingView },
     { path: '/deals', name: 'deals', component: DealsView },
     { path: '/settings', name: 'settings', component: SettingsView },
   ],

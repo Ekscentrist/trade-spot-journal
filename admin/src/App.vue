@@ -19,6 +19,7 @@ function logout() {
       <div class="brand">Trade</div>
       <nav>
         <RouterLink to="/">Orders</RouterLink>
+        <RouterLink to="/staking">Staking</RouterLink>
         <RouterLink to="/deals">Deals</RouterLink>
         <RouterLink to="/settings">Settings</RouterLink>
       </nav>

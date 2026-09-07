@@ -55,6 +55,7 @@ const orderSelect = {
   allocatedSz: true,
   dealId: true,
   archivedAt: true,
+  stakedAt: true,
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.OrderSelect;
@@ -105,6 +106,7 @@ export class OrdersService {
         side: 'buy',
         dealId: null,
         archivedAt: null,
+        stakedAt: null,
         state: { in: ['filled', 'partially_filled'] },
         ...(instIds.length ? { instId: { in: instIds } } : {}),
       },
@@ -150,6 +152,7 @@ export class OrdersService {
         side: 'buy',
         dealId: null,
         archivedAt: { not: null },
+        stakedAt: null,
         state: { in: ['filled', 'partially_filled'] },
         ...(instIds.length ? { instId: { in: instIds } } : {}),
       },
@@ -203,14 +206,16 @@ export class OrdersService {
     return { buys: openBuys, unlinkedSells, archivedSells, archivedBuys };
   }
 
-  async listMtm(params: { instIds?: string[] }) {
+  async listMtm(params: { instIds?: string[]; staked?: boolean }) {
     const instIds = (params.instIds || []).filter(Boolean);
+    const staked = Boolean(params.staked);
 
     const buys = await this.prisma.order.findMany({
       where: {
         side: 'buy',
         dealId: null,
         archivedAt: null,
+        stakedAt: staked ? { not: null } : null,
         state: { in: ['filled', 'partially_filled'] },
         ...(instIds.length ? { instId: { in: instIds } } : {}),
       },
@@ -288,6 +293,61 @@ export class OrdersService {
     };
   }
 
+  async listStaking(params: { instIds?: string[] }) {
+    const instIds = (params.instIds || []).filter(Boolean);
+
+    const buys = await this.prisma.order.findMany({
+      where: {
+        side: 'buy',
+        dealId: null,
+        archivedAt: null,
+        stakedAt: { not: null },
+        state: { in: ['filled', 'partially_filled'] },
+        ...(instIds.length ? { instId: { in: instIds } } : {}),
+      },
+      orderBy: [{ stakedAt: 'desc' }, { filledAt: 'desc' }],
+      select: {
+        ...orderSelect,
+        matchedSells: {
+          where: { dealId: null, archivedAt: null },
+          orderBy: [{ filledAt: 'asc' }, { id: 'asc' }],
+          select: orderSelect,
+        },
+      },
+    });
+
+    const prices = await getLastPrices(buys.map((buy) => buy.instId));
+
+    return buys.map((buy) => {
+      const lastPx = prices.get(buy.instId) ?? null;
+      const stats = calcOpenBuyMtm({
+        instId: buy.instId,
+        buy,
+        sells: buy.matchedSells,
+        lastPx,
+      });
+      const partialPnl =
+        stats.mtmPnl != null
+          ? formatNum(stats.mtmPnl, 6)
+          : formatNum(stats.pnl, 6);
+
+      return {
+        ...buy,
+        soldSz: formatNum(stats.sellSz),
+        remainingSz: formatNum(stats.remainingSz),
+        coverage: stats.coverage,
+        lastPx: stats.lastPx != null ? formatNum(stats.lastPx) : null,
+        partialPnl,
+        partialPnlIsMtm: stats.mtmPnl != null,
+        quoteCcy: stats.quoteCcy,
+      };
+    });
+  }
+
+  async listStakingMtm(params: { instIds?: string[] }) {
+    return this.listMtm({ ...params, staked: true });
+  }
+
   async link(sellOrderId: number, buyOrderId: number) {
     const [sell, buy] = await Promise.all([
       this.prisma.order.findUnique({ where: { id: sellOrderId } }),
@@ -314,6 +374,9 @@ export class OrdersService {
     }
     if (buy.archivedAt) {
       throw new BadRequestException('Archived buy cannot accept sells');
+    }
+    if (buy.stakedAt) {
+      throw new BadRequestException('Unstake the buy before linking sells');
     }
     if (sell.matchedBuyId) {
       throw new BadRequestException('Sell is already linked');
@@ -402,6 +465,9 @@ export class OrdersService {
     if (order.archivedAt) {
       throw new BadRequestException('Order is already archived');
     }
+    if (order.stakedAt) {
+      throw new BadRequestException('Unstake before archiving');
+    }
 
     await this.prisma.order.update({
       where: { id: order.id },
@@ -426,6 +492,55 @@ export class OrdersService {
     });
 
     return { unarchived: true, open: await this.listOpen({}) };
+  }
+
+  async stake(orderId: number) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+    });
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+    if (order.side !== 'buy') {
+      throw new BadRequestException('Only buy orders can be staked');
+    }
+    if (order.dealId) {
+      throw new BadRequestException('Cannot stake an order from a closed deal');
+    }
+    if (order.archivedAt) {
+      throw new BadRequestException('Unarchive before staking');
+    }
+    if (order.stakedAt) {
+      throw new BadRequestException('Buy is already staked');
+    }
+
+    await this.prisma.order.update({
+      where: { id: order.id },
+      data: { stakedAt: new Date() },
+    });
+
+    return { staked: true, open: await this.listOpen({}) };
+  }
+
+  async unstake(orderId: number) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+    if (!order.stakedAt) {
+      throw new BadRequestException('Buy is not staked');
+    }
+
+    await this.prisma.order.update({
+      where: { id: order.id },
+      data: { stakedAt: null },
+    });
+
+    return {
+      unstaked: true,
+      open: await this.listOpen({}),
+      staking: await this.listStaking({}),
+    };
   }
 
   private async maybeCloseBuy(buyOrderId: number) {

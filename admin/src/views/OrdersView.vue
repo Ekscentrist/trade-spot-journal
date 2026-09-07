@@ -366,6 +366,23 @@ async function archive(orderId: number) {
   }
 }
 
+async function stake(orderId: number) {
+  loading.value = true
+  error.value = ''
+  message.value = ''
+  try {
+    const res = await api<{ open: OpenResponse }>(`/orders/${orderId}/stake`, {
+      method: 'POST',
+    })
+    applyOpen(res.open)
+    message.value = 'Buy moved to Staking'
+  } catch (e) {
+    error.value = (e as Error).message
+  } finally {
+    loading.value = false
+  }
+}
+
 async function unarchive(orderId: number) {
   loading.value = true
   error.value = ''
@@ -486,6 +503,13 @@ onUnmounted(() => {
             <span class="badge buy">buy</span>
             <strong>{{ buy.instId }}</strong>
             <span class="muted">{{ fmt(buy.filledAt) }}</span>
+            <button
+              class="linkish"
+              type="button"
+              @click.stop="stake(buy.id)"
+            >
+              Stake
+            </button>
             <button
               class="linkish dangerish"
               type="button"
@@ -748,8 +772,12 @@ p { margin: 0.2rem 0 0; color: var(--muted); }
   gap: 0.55rem;
   align-items: center;
   margin-bottom: 0.45rem;
+  flex-wrap: wrap;
 }
 .card-top .linkish {
+  margin-left: 0;
+}
+.card-top .linkish:first-of-type {
   margin-left: auto;
 }
 .dangerish {
