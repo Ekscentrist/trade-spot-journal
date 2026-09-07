@@ -1,0 +1,82 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Setting {
+  id               Int      @id @default(1)
+  okxApiKey        String?  @db.VarChar(191)
+  okxSecret        String?  @db.Text
+  okxPassphrase    String?  @db.VarChar(191)
+  telegramBotToken String?  @db.VarChar(191)
+  telegramChatId   String?  @db.VarChar(64)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model Order {
+  id           Int       @id @default(autoincrement())
+  ordId        String    @unique @db.VarChar(64)
+  clOrdId      String?   @db.VarChar(64)
+  instId       String    @db.VarChar(64)
+  side         String    @db.VarChar(16)
+  ordType      String?   @db.VarChar(32)
+  state        String    @db.VarChar(32)
+  px           String?   @db.VarChar(64)
+  sz           String?   @db.VarChar(64)
+  fillPx       String?   @db.VarChar(64)
+  avgPx        String?   @db.VarChar(64)
+  accFillSz    String?   @db.VarChar(64)
+  fee          String?   @db.VarChar(64)
+  feeCcy       String?   @db.VarChar(32)
+  rawJson      Json?
+  filledAt     DateTime?
+  notifiedAt   DateTime?
+  matchedBuyId Int?
+  allocatedSz  String?   @db.VarChar(64)
+  dealId       Int?
+  archivedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  matchedBuy   Order?  @relation("BuySells", fields: [matchedBuyId], references: [id])
+  matchedSells Order[] @relation("BuySells")
+  deal         Deal?   @relation("DealOrders", fields: [dealId], references: [id])
+  dealAsBuy    Deal?   @relation("DealBuy")
+
+  @@index([instId])
+  @@index([state])
+  @@index([filledAt])
+  @@index([matchedBuyId])
+  @@index([dealId])
+  @@index([side])
+  @@index([archivedAt])
+}
+
+model Deal {
+  id         Int      @id @default(autoincrement())
+  instId     String   @db.VarChar(64)
+  buyOrderId Int      @unique
+  buySz      String   @db.VarChar(64)
+  buyAvgPx   String   @db.VarChar(64)
+  buyFee     String?  @db.VarChar(64)
+  buyFeeCcy  String?  @db.VarChar(32)
+  sellSz     String   @db.VarChar(64)
+  sellAvgPx  String   @db.VarChar(64)
+  sellFee    String?  @db.VarChar(64)
+  sellFeeCcy String?  @db.VarChar(32)
+  pnl        String   @db.VarChar(64)
+  quoteCcy   String?  @db.VarChar(32)
+  closedAt   DateTime
+  createdAt  DateTime @default(now())
+
+  buyOrder Order   @relation("DealBuy", fields: [buyOrderId], references: [id])
+  orders   Order[] @relation("DealOrders")
+
+  @@index([instId])
+  @@index([closedAt])
+}
