@@ -10,6 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
+import { parseExchange, parseInstIds } from '../exchange.js';
 import { LinkOrdersDto } from './dto/link-orders.dto.js';
 import { OrdersService } from './orders.service.js';
 
@@ -19,62 +20,54 @@ export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
 
   @Get('instruments')
-  instruments() {
-    return this.ordersService.listInstruments();
+  instruments(@Query('exchange') exchange?: string) {
+    return this.ordersService.listInstruments(parseExchange(exchange));
   }
 
   @Get('open')
   open(
+    @Query('exchange') exchange?: string,
     @Query('instIds') instIds?: string | string[],
     @Query('side') side?: string,
   ) {
-    const parsed = Array.isArray(instIds)
-      ? instIds.flatMap((value) => value.split(','))
-      : (instIds || '')
-          .split(',')
-          .map((value) => value.trim())
-          .filter(Boolean);
-
     return this.ordersService.listOpen({
-      instIds: parsed,
+      exchange: parseExchange(exchange),
+      instIds: parseInstIds(instIds),
       side: side || undefined,
     });
   }
 
   @Get('mtm')
-  mtm(@Query('instIds') instIds?: string | string[]) {
-    const parsed = Array.isArray(instIds)
-      ? instIds.flatMap((value) => value.split(','))
-      : (instIds || '')
-          .split(',')
-          .map((value) => value.trim())
-          .filter(Boolean);
-
-    return this.ordersService.listMtm({ instIds: parsed });
+  mtm(
+    @Query('exchange') exchange?: string,
+    @Query('instIds') instIds?: string | string[],
+  ) {
+    return this.ordersService.listMtm({
+      exchange: parseExchange(exchange),
+      instIds: parseInstIds(instIds),
+    });
   }
 
   @Get('staking')
-  staking(@Query('instIds') instIds?: string | string[]) {
-    const parsed = Array.isArray(instIds)
-      ? instIds.flatMap((value) => value.split(','))
-      : (instIds || '')
-          .split(',')
-          .map((value) => value.trim())
-          .filter(Boolean);
-
-    return this.ordersService.listStaking({ instIds: parsed });
+  staking(
+    @Query('exchange') exchange?: string,
+    @Query('instIds') instIds?: string | string[],
+  ) {
+    return this.ordersService.listStaking({
+      exchange: parseExchange(exchange),
+      instIds: parseInstIds(instIds),
+    });
   }
 
   @Get('staking/mtm')
-  stakingMtm(@Query('instIds') instIds?: string | string[]) {
-    const parsed = Array.isArray(instIds)
-      ? instIds.flatMap((value) => value.split(','))
-      : (instIds || '')
-          .split(',')
-          .map((value) => value.trim())
-          .filter(Boolean);
-
-    return this.ordersService.listStakingMtm({ instIds: parsed });
+  stakingMtm(
+    @Query('exchange') exchange?: string,
+    @Query('instIds') instIds?: string | string[],
+  ) {
+    return this.ordersService.listStakingMtm({
+      exchange: parseExchange(exchange),
+      instIds: parseInstIds(instIds),
+    });
   }
 
   @Post('link')
@@ -109,19 +102,14 @@ export class OrdersController {
 
   @Get()
   list(
+    @Query('exchange') exchange?: string,
     @Query('instIds') instIds?: string | string[],
     @Query('side') side?: string,
     @Query('limit') limit?: string,
   ) {
-    const parsed = Array.isArray(instIds)
-      ? instIds.flatMap((value) => value.split(','))
-      : (instIds || '')
-          .split(',')
-          .map((value) => value.trim())
-          .filter(Boolean);
-
     return this.ordersService.list({
-      instIds: parsed,
+      exchange: parseExchange(exchange),
+      instIds: parseInstIds(instIds),
       side: side || undefined,
       limit: limit ? Number(limit) : undefined,
     });

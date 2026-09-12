@@ -32,7 +32,7 @@ async function submit() {
 <template>
   <div class="login">
     <h1>Trade Admin</h1>
-    <p>OKX Spot fills → Telegram</p>
+    <p>Spot fills → Telegram</p>
     <form @submit.prevent="submit">
       <label>
         Login

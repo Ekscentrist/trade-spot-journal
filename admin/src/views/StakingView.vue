@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from '../api'
+import { exchange, exchangeQuery } from '../exchange'
 
 type OrderRow = {
   id: number
@@ -51,11 +52,17 @@ type MtmResponse = {
 }
 
 const MTM_POLL_MS = 5_000
-const INST_KEY = 'trade_staking_instIds'
+const LEGACY_INST_KEY = 'trade_staking_instIds'
 
-function readStoredInstIds(): string[] {
+function instStorageKey(ex: string) {
+  return `trade_staking_instIds_${ex}`
+}
+
+function readStoredInstIds(ex: string): string[] {
   try {
-    const raw = localStorage.getItem(INST_KEY)
+    const raw =
+      localStorage.getItem(instStorageKey(ex)) ||
+      (ex === 'okx' ? localStorage.getItem(LEGACY_INST_KEY) : null)
     if (!raw) return []
     const parsed = JSON.parse(raw)
     return Array.isArray(parsed)
@@ -68,7 +75,7 @@ function readStoredInstIds(): string[] {
 
 const buys = ref<StakedBuy[]>([])
 const instruments = ref<string[]>([])
-const selectedInstIds = ref<string[]>(readStoredInstIds())
+const selectedInstIds = ref<string[]>(readStoredInstIds(exchange.value))
 const instrumentsOpen = ref(false)
 const error = ref('')
 const message = ref('')
@@ -146,12 +153,11 @@ function onDocumentClick(event: MouseEvent) {
 }
 
 function openQuery() {
-  const params = new URLSearchParams()
-  if (selectedInstIds.value.length) {
-    params.set('instIds', selectedInstIds.value.join(','))
-  }
-  const qs = params.toString()
-  return qs ? `?${qs}` : ''
+  return exchangeQuery(
+    selectedInstIds.value.length
+      ? { instIds: selectedInstIds.value.join(',') }
+      : undefined,
+  )
 }
 
 function mergeMtm(rows: MtmRow[]) {
@@ -215,7 +221,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const available = await api<string[]>('/orders/instruments')
+    const available = await api<string[]>(`/orders/instruments${exchangeQuery()}`)
     instruments.value = available
     selectedInstIds.value = selectedInstIds.value.filter((id) =>
       available.includes(id),
@@ -250,10 +256,15 @@ async function unstake(orderId: number) {
 watch(
   selectedInstIds,
   (value) => {
-    localStorage.setItem(INST_KEY, JSON.stringify(value))
+    localStorage.setItem(instStorageKey(exchange.value), JSON.stringify(value))
   },
   { deep: true },
 )
+
+watch(exchange, (ex) => {
+  selectedInstIds.value = readStoredInstIds(ex)
+  void load().then(() => startMtmPoll())
+})
 
 onMounted(() => {
   document.addEventListener('click', onDocumentClick)

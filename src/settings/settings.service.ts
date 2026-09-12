@@ -8,6 +8,17 @@ function mask(value: string | null | undefined): string | null {
   return `${value.slice(0, 2)}****${value.slice(-2)}`;
 }
 
+const SETTING_KEYS = [
+  'okxApiKey',
+  'okxSecret',
+  'okxPassphrase',
+  'bitgetApiKey',
+  'bitgetSecret',
+  'bitgetPassphrase',
+  'telegramBotToken',
+  'telegramChatId',
+] as const;
+
 @Injectable()
 export class SettingsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -24,9 +35,15 @@ export class SettingsService {
       okxApiKey: mask(row.okxApiKey),
       okxSecret: mask(row.okxSecret),
       okxPassphrase: mask(row.okxPassphrase),
+      bitgetApiKey: mask(row.bitgetApiKey),
+      bitgetSecret: mask(row.bitgetSecret),
+      bitgetPassphrase: mask(row.bitgetPassphrase),
       telegramBotToken: mask(row.telegramBotToken),
       telegramChatId: row.telegramChatId,
       hasOkx: Boolean(row.okxApiKey && row.okxSecret && row.okxPassphrase),
+      hasBitget: Boolean(
+        row.bitgetApiKey && row.bitgetSecret && row.bitgetPassphrase,
+      ),
       hasTelegram: Boolean(row.telegramBotToken && row.telegramChatId),
       updatedAt: row.updatedAt,
     };
@@ -40,13 +57,7 @@ export class SettingsService {
     await this.ensureRow();
     const data: Record<string, string> = {};
 
-    for (const key of [
-      'okxApiKey',
-      'okxSecret',
-      'okxPassphrase',
-      'telegramBotToken',
-      'telegramChatId',
-    ] as const) {
+    for (const key of SETTING_KEYS) {
       const value = dto[key];
       if (typeof value === 'string' && value.trim() !== '' && !value.includes('****')) {
         data[key] = value.trim();

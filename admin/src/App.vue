@@ -2,14 +2,25 @@
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { computed } from 'vue'
 import { clearToken, getToken } from './api'
+import { exchange, setExchange, type Exchange } from './exchange'
 
 const route = useRoute()
 const router = useRouter()
 const authed = computed(() => Boolean(getToken()) && route.name !== 'login')
 
+const selectedExchange = computed({
+  get: () => exchange.value,
+  set: (value: string) => setExchange(value === 'bitget' ? 'bitget' : 'okx'),
+})
+
 function logout() {
   clearToken()
   router.push({ name: 'login' })
+}
+
+function onExchangeChange(event: Event) {
+  const value = (event.target as HTMLSelectElement).value as Exchange
+  setExchange(value)
 }
 </script>
 
@@ -23,7 +34,17 @@ function logout() {
         <RouterLink to="/deals">Deals</RouterLink>
         <RouterLink to="/settings">Settings</RouterLink>
       </nav>
-      <button class="secondary" type="button" @click="logout">Logout</button>
+      <div class="header-actions">
+        <select
+          class="exchange-select"
+          :value="selectedExchange"
+          @change="onExchangeChange"
+        >
+          <option value="okx">OKX</option>
+          <option value="bitget">Bitget</option>
+        </select>
+        <button class="secondary" type="button" @click="logout">Logout</button>
+      </div>
     </header>
     <main>
       <RouterView />
@@ -47,6 +68,7 @@ function logout() {
   font-weight: 700;
   letter-spacing: 0.02em;
   font-size: 1.15rem;
+  color: var(--text);
 }
 nav {
   display: flex;
@@ -60,14 +82,23 @@ nav a {
 nav a.router-link-active {
   color: var(--text);
 }
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+.exchange-select {
+  width: auto;
+  min-width: 7.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+}
 main {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 16px;
   padding: 1.25rem;
   box-shadow: var(--shadow);
-}
-.brand {
-  color: var(--text);
 }
 </style>

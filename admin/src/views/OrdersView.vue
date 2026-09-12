@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from '../api'
+import { exchange, exchangeLabel, exchangeQuery } from '../exchange'
 
 type OrderRow = {
   id: number
@@ -57,23 +58,31 @@ type MtmResponse = {
   unrealizedByQuote?: { quote: string; total: string }[]
 }
 
+type ConnStatus = {
+  connected: boolean
+  loggedIn: boolean
+  lastError: string | null
+  lastEventAt: string | null
+  reconnecting: boolean
+}
+
 type Status = {
-  okx: {
-    connected: boolean
-    loggedIn: boolean
-    lastError: string | null
-    lastEventAt: string | null
-    reconnecting: boolean
-  }
+  okx: ConnStatus
+  bitget: ConnStatus
 }
 
 const MTM_POLL_MS = 5_000
+const LEGACY_INST_KEY = 'trade_orders_instIds'
 
-const INST_KEY = 'trade_orders_instIds'
+function instStorageKey(ex: string) {
+  return `trade_orders_instIds_${ex}`
+}
 
-function readStoredInstIds(): string[] {
+function readStoredInstIds(ex: string): string[] {
   try {
-    const raw = localStorage.getItem(INST_KEY)
+    const raw =
+      localStorage.getItem(instStorageKey(ex)) ||
+      (ex === 'okx' ? localStorage.getItem(LEGACY_INST_KEY) : null)
     if (!raw) return []
     const parsed = JSON.parse(raw)
     return Array.isArray(parsed)
@@ -89,8 +98,9 @@ const unlinkedSells = ref<OrderRow[]>([])
 const archivedSells = ref<OrderRow[]>([])
 const archivedBuys = ref<OrderRow[]>([])
 const instruments = ref<string[]>([])
-const selectedInstIds = ref<string[]>(readStoredInstIds())
+const selectedInstIds = ref<string[]>(readStoredInstIds(exchange.value))
 const status = ref<Status | null>(null)
+const conn = computed(() => status.value?.[exchange.value] ?? null)
 const instrumentsOpen = ref(false)
 const showArchivedSells = ref(false)
 const showArchivedBuys = ref(false)
@@ -179,12 +189,11 @@ function onDocumentClick(event: MouseEvent) {
 }
 
 function openQuery() {
-  const params = new URLSearchParams()
-  if (selectedInstIds.value.length) {
-    params.set('instIds', selectedInstIds.value.join(','))
-  }
-  const qs = params.toString()
-  return qs ? `?${qs}` : ''
+  return exchangeQuery(
+    selectedInstIds.value.length
+      ? { instIds: selectedInstIds.value.join(',') }
+      : undefined,
+  )
 }
 
 function mergeMtm(rows: MtmRow[]) {
@@ -248,7 +257,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const available = await api<string[]>('/orders/instruments')
+    const available = await api<string[]>(`/orders/instruments${exchangeQuery()}`)
     instruments.value = available
     selectedInstIds.value = selectedInstIds.value.filter((id) =>
       available.includes(id),
@@ -403,10 +412,15 @@ async function unarchive(orderId: number) {
 watch(
   selectedInstIds,
   (value) => {
-    localStorage.setItem(INST_KEY, JSON.stringify(value))
+    localStorage.setItem(instStorageKey(exchange.value), JSON.stringify(value))
   },
   { deep: true },
 )
+
+watch(exchange, (ex) => {
+  selectedInstIds.value = readStoredInstIds(ex)
+  void load().then(() => startMtmPoll())
+})
 
 onMounted(() => {
   document.addEventListener('click', onDocumentClick)
@@ -465,22 +479,22 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div v-if="status" class="status">
+    <div v-if="conn" class="status">
       <span
         class="badge"
-        :class="status.okx.connected && status.okx.loggedIn ? 'ok' : status.okx.reconnecting ? 'warn' : 'err'"
+        :class="conn.connected && conn.loggedIn ? 'ok' : conn.reconnecting ? 'warn' : 'err'"
       >
-        OKX:
+        {{ exchangeLabel() }}:
         {{
-          status.okx.connected && status.okx.loggedIn
+          conn.connected && conn.loggedIn
             ? 'connected'
-            : status.okx.reconnecting
+            : conn.reconnecting
               ? 'reconnecting'
               : 'offline'
         }}
       </span>
-      <span v-if="status.okx.lastError" class="error">{{ status.okx.lastError }}</span>
-      <span v-if="status.okx.lastEventAt" class="muted">last event {{ fmt(status.okx.lastEventAt) }}</span>
+      <span v-if="conn.lastError" class="error">{{ conn.lastError }}</span>
+      <span v-if="conn.lastEventAt" class="muted">last event {{ fmt(conn.lastEventAt) }}</span>
     </div>
 
     <p v-if="error" class="error">{{ error }}</p>

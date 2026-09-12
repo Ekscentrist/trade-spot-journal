@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { type Exchange, exchangeLabel } from '../exchange.js';
 import { SettingsService } from '../settings/settings.service.js';
 
 @Injectable()
@@ -39,20 +40,23 @@ export class TelegramService {
     }
   }
 
-  formatOrderMessage(order: {
-    instId: string;
-    side: string;
-    state: string;
-    ordType?: string | null;
-    px?: string | null;
-    avgPx?: string | null;
-    fillPx?: string | null;
-    sz?: string | null;
-    accFillSz?: string | null;
-    fee?: string | null;
-    feeCcy?: string | null;
-    ordId: string;
-  }) {
+  formatOrderMessage(
+    order: {
+      instId: string;
+      side: string;
+      state: string;
+      ordType?: string | null;
+      px?: string | null;
+      avgPx?: string | null;
+      fillPx?: string | null;
+      sz?: string | null;
+      accFillSz?: string | null;
+      fee?: string | null;
+      feeCcy?: string | null;
+      ordId: string;
+    },
+    exchange: Exchange = 'okx',
+  ) {
     const price = order.avgPx || order.fillPx || order.px || '-';
     const size = order.accFillSz || order.sz || '-';
     const fee =
@@ -61,7 +65,7 @@ export class TelegramService {
         : order.fee || '-';
 
     return [
-      `OKX Spot ${order.state.toUpperCase()}`,
+      `${exchangeLabel(exchange)} Spot ${order.state.toUpperCase()}`,
       `${order.side.toUpperCase()} ${order.instId}`,
       `Type: ${order.ordType || '-'}`,
       `Size: ${size}`,

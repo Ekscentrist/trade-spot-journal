@@ -2,7 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { OrdersModule } from '../orders/orders.module.js';
 import { SettingsModule } from '../settings/settings.module.js';
 import { TelegramModule } from '../telegram/telegram.module.js';
-import { OkxService } from './okx.service.js';
+import { BitgetService } from './bitget.service.js';
 
 @Module({
   imports: [
@@ -10,7 +10,7 @@ import { OkxService } from './okx.service.js';
     OrdersModule,
     forwardRef(() => TelegramModule),
   ],
-  providers: [OkxService],
-  exports: [OkxService],
+  providers: [BitgetService],
+  exports: [BitgetService],
 })
-export class OkxModule {}
+export class BitgetModule {}

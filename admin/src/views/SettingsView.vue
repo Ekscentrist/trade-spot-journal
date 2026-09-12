@@ -1,31 +1,43 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { api } from '../api'
+import { type Exchange, exchangeLabel } from '../exchange'
 
 type Settings = {
   okxApiKey: string | null
   okxSecret: string | null
   okxPassphrase: string | null
+  bitgetApiKey: string | null
+  bitgetSecret: string | null
+  bitgetPassphrase: string | null
   telegramBotToken: string | null
   telegramChatId: string | null
   hasOkx: boolean
+  hasBitget: boolean
   hasTelegram: boolean
   updatedAt: string
 }
 
+type ConnStatus = {
+  connected: boolean
+  loggedIn: boolean
+  lastError: string | null
+  lastEventAt?: string | null
+  reconnecting: boolean
+}
+
 type Status = {
-  okx: {
-    connected: boolean
-    loggedIn: boolean
-    lastError: string | null
-    reconnecting: boolean
-  }
+  okx: ConnStatus
+  bitget: ConnStatus
 }
 
 const form = reactive({
   okxApiKey: '',
   okxSecret: '',
   okxPassphrase: '',
+  bitgetApiKey: '',
+  bitgetSecret: '',
+  bitgetPassphrase: '',
   telegramBotToken: '',
   telegramChatId: '',
 })
@@ -35,6 +47,10 @@ const status = ref<Status | null>(null)
 const error = ref('')
 const message = ref('')
 const loading = ref(false)
+
+function online(conn?: ConnStatus | null) {
+  return Boolean(conn?.connected && conn.loggedIn)
+}
 
 async function load() {
   error.value = ''
@@ -67,9 +83,19 @@ async function save() {
     form.okxApiKey = ''
     form.okxSecret = ''
     form.okxPassphrase = ''
+    form.bitgetApiKey = ''
+    form.bitgetSecret = ''
+    form.bitgetPassphrase = ''
     form.telegramBotToken = ''
     status.value = await api<Status>('/status')
-    message.value = 'Saved. OKX reconnect triggered.'
+    const reconnecting: string[] = []
+    if (body.okxApiKey || body.okxSecret || body.okxPassphrase) reconnecting.push('OKX')
+    if (body.bitgetApiKey || body.bitgetSecret || body.bitgetPassphrase) {
+      reconnecting.push('Bitget')
+    }
+    message.value = reconnecting.length
+      ? `Saved. ${reconnecting.join(' + ')} reconnect triggered.`
+      : 'Saved.'
   } catch (e) {
     error.value = (e as Error).message
   } finally {
@@ -77,14 +103,14 @@ async function save() {
   }
 }
 
-async function reconnect() {
+async function reconnect(ex: Exchange) {
   loading.value = true
   error.value = ''
   message.value = ''
   try {
-    const okx = await api<Status['okx']>('/settings/reconnect', { method: 'PUT' })
-    status.value = { okx }
-    message.value = 'Reconnect requested.'
+    await api(`/settings/reconnect?exchange=${ex}`, { method: 'PUT' })
+    status.value = await api<Status>('/status')
+    message.value = `${exchangeLabel(ex)} reconnect requested.`
   } catch (e) {
     error.value = (e as Error).message
   } finally {
@@ -100,27 +126,36 @@ onMounted(load)
     <div class="head">
       <div>
         <h1>Settings</h1>
-        <p>OKX read-only key + Telegram bot</p>
+        <p>Exchange read-only keys + Telegram bot</p>
       </div>
-      <button class="secondary" type="button" @click="reconnect" :disabled="loading">
-        Reconnect OKX
-      </button>
+      <div class="actions">
+        <button class="secondary" type="button" @click="reconnect('okx')" :disabled="loading">
+          Reconnect OKX
+        </button>
+        <button class="secondary" type="button" @click="reconnect('bitget')" :disabled="loading">
+          Reconnect Bitget
+        </button>
+      </div>
     </div>
 
     <div v-if="status" class="status">
-      <span
-        class="badge"
-        :class="status.okx.connected && status.okx.loggedIn ? 'ok' : 'err'"
-      >
-        OKX {{ status.okx.connected && status.okx.loggedIn ? 'online' : 'offline' }}
+      <span class="badge" :class="online(status.okx) ? 'ok' : 'err'">
+        OKX {{ online(status.okx) ? 'online' : 'offline' }}
       </span>
       <span v-if="settings" class="badge" :class="settings.hasOkx ? 'ok' : 'warn'">
-        keys {{ settings.hasOkx ? 'set' : 'missing' }}
+        OKX keys {{ settings.hasOkx ? 'set' : 'missing' }}
+      </span>
+      <span class="badge" :class="online(status.bitget) ? 'ok' : 'err'">
+        Bitget {{ online(status.bitget) ? 'online' : 'offline' }}
+      </span>
+      <span v-if="settings" class="badge" :class="settings.hasBitget ? 'ok' : 'warn'">
+        Bitget keys {{ settings.hasBitget ? 'set' : 'missing' }}
       </span>
       <span v-if="settings" class="badge" :class="settings.hasTelegram ? 'ok' : 'warn'">
         telegram {{ settings.hasTelegram ? 'set' : 'missing' }}
       </span>
-      <span v-if="status.okx.lastError" class="error">{{ status.okx.lastError }}</span>
+      <span v-if="status.okx.lastError" class="error">OKX: {{ status.okx.lastError }}</span>
+      <span v-if="status.bitget.lastError" class="error">Bitget: {{ status.bitget.lastError }}</span>
     </div>
 
     <form class="grid" @submit.prevent="save">
@@ -136,6 +171,20 @@ onMounted(load)
       <label>
         Passphrase
         <input v-model="form.okxPassphrase" type="password" :placeholder="settings?.okxPassphrase || 'Passphrase'" />
+      </label>
+
+      <h2>Bitget</h2>
+      <label>
+        API Key
+        <input v-model="form.bitgetApiKey" :placeholder="settings?.bitgetApiKey || 'API key'" />
+      </label>
+      <label>
+        Secret
+        <input v-model="form.bitgetSecret" type="password" :placeholder="settings?.bitgetSecret || 'Secret'" />
+      </label>
+      <label>
+        Passphrase
+        <input v-model="form.bitgetPassphrase" type="password" :placeholder="settings?.bitgetPassphrase || 'Passphrase'" />
       </label>
 
       <h2>Telegram</h2>
@@ -169,6 +218,11 @@ onMounted(load)
   justify-content: space-between;
   gap: 1rem;
   align-items: end;
+  flex-wrap: wrap;
+}
+.actions {
+  display: flex;
+  gap: 0.5rem;
   flex-wrap: wrap;
 }
 h1 { margin: 0; font-size: 1.35rem; }

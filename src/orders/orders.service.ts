@@ -4,7 +4,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { type Exchange, parseExchange } from '../exchange.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { getLastPrices } from './tickers.js';
 import {
   CLOSE_THRESHOLD,
   calcOpenBuyMtm,
@@ -13,9 +15,8 @@ import {
   orderSize,
   parseNum,
 } from './trade-math.js';
-import { getLastPrices } from './okx-ticker.js';
 
-export type OkxOrderPayload = {
+export type FillPayload = {
   ordId: string;
   clOrdId?: string;
   instId: string;
@@ -34,8 +35,12 @@ export type OkxOrderPayload = {
   cTime?: string;
 };
 
+/** @deprecated Use FillPayload */
+export type OkxOrderPayload = FillPayload;
+
 const orderSelect = {
   id: true,
+  exchange: true,
   ordId: true,
   clOrdId: true,
   instId: true,
@@ -65,6 +70,7 @@ export class OrdersService {
   constructor(private readonly prisma: PrismaService) {}
 
   async list(params: {
+    exchange: Exchange;
     instIds?: string[];
     side?: string;
     limit?: number;
@@ -76,6 +82,7 @@ export class OrdersService {
 
     return this.prisma.order.findMany({
       where: {
+        exchange: params.exchange,
         ...(instIds.length ? { instId: { in: instIds } } : {}),
         ...(side ? { side } : {}),
         state: { in: ['filled', 'partially_filled'] },
@@ -86,9 +93,12 @@ export class OrdersService {
     });
   }
 
-  async listInstruments() {
+  async listInstruments(exchange: Exchange) {
     const rows = await this.prisma.order.findMany({
-      where: { state: { in: ['filled', 'partially_filled'] } },
+      where: {
+        exchange,
+        state: { in: ['filled', 'partially_filled'] },
+      },
       distinct: ['instId'],
       select: { instId: true },
       orderBy: { instId: 'asc' },
@@ -96,13 +106,19 @@ export class OrdersService {
     return rows.map((row) => row.instId);
   }
 
-  async listOpen(params: { instIds?: string[]; side?: string }) {
+  async listOpen(params: {
+    exchange: Exchange;
+    instIds?: string[];
+    side?: string;
+  }) {
     const instIds = (params.instIds || []).filter(Boolean);
     const side =
       params.side === 'buy' || params.side === 'sell' ? params.side : undefined;
+    const exchange = params.exchange;
 
     const buys = await this.prisma.order.findMany({
       where: {
+        exchange,
         side: 'buy',
         dealId: null,
         archivedAt: null,
@@ -123,6 +139,7 @@ export class OrdersService {
 
     const unlinkedSells = await this.prisma.order.findMany({
       where: {
+        exchange,
         side: 'sell',
         dealId: null,
         matchedBuyId: null,
@@ -136,6 +153,7 @@ export class OrdersService {
 
     const archivedSells = await this.prisma.order.findMany({
       where: {
+        exchange,
         side: 'sell',
         dealId: null,
         matchedBuyId: null,
@@ -149,6 +167,7 @@ export class OrdersService {
 
     const archivedBuys = await this.prisma.order.findMany({
       where: {
+        exchange,
         side: 'buy',
         dealId: null,
         archivedAt: { not: null },
@@ -160,7 +179,10 @@ export class OrdersService {
       select: orderSelect,
     });
 
-    const prices = await getLastPrices(buys.map((buy) => buy.instId));
+    const prices = await getLastPrices(
+      buys.map((buy) => buy.instId),
+      exchange,
+    );
 
     const openBuys = buys.map((buy) => {
       const lastPx = prices.get(buy.instId) ?? null;
@@ -206,12 +228,18 @@ export class OrdersService {
     return { buys: openBuys, unlinkedSells, archivedSells, archivedBuys };
   }
 
-  async listMtm(params: { instIds?: string[]; staked?: boolean }) {
+  async listMtm(params: {
+    exchange: Exchange;
+    instIds?: string[];
+    staked?: boolean;
+  }) {
     const instIds = (params.instIds || []).filter(Boolean);
     const staked = Boolean(params.staked);
+    const exchange = params.exchange;
 
     const buys = await this.prisma.order.findMany({
       where: {
+        exchange,
         side: 'buy',
         dealId: null,
         archivedAt: null,
@@ -245,7 +273,10 @@ export class OrdersService {
       },
     });
 
-    const prices = await getLastPrices(buys.map((buy) => buy.instId));
+    const prices = await getLastPrices(
+      buys.map((buy) => buy.instId),
+      exchange,
+    );
     const unrealizedByQuote = new Map<string, number>();
 
     const rows = buys.map((buy) => {
@@ -293,11 +324,13 @@ export class OrdersService {
     };
   }
 
-  async listStaking(params: { instIds?: string[] }) {
+  async listStaking(params: { exchange: Exchange; instIds?: string[] }) {
     const instIds = (params.instIds || []).filter(Boolean);
+    const exchange = params.exchange;
 
     const buys = await this.prisma.order.findMany({
       where: {
+        exchange,
         side: 'buy',
         dealId: null,
         archivedAt: null,
@@ -316,7 +349,10 @@ export class OrdersService {
       },
     });
 
-    const prices = await getLastPrices(buys.map((buy) => buy.instId));
+    const prices = await getLastPrices(
+      buys.map((buy) => buy.instId),
+      exchange,
+    );
 
     return buys.map((buy) => {
       const lastPx = prices.get(buy.instId) ?? null;
@@ -344,7 +380,7 @@ export class OrdersService {
     });
   }
 
-  async listStakingMtm(params: { instIds?: string[] }) {
+  async listStakingMtm(params: { exchange: Exchange; instIds?: string[] }) {
     return this.listMtm({ ...params, staked: true });
   }
 
@@ -365,6 +401,9 @@ export class OrdersService {
     }
     if (buy.side !== 'buy') {
       throw new BadRequestException('Target must be a buy order');
+    }
+    if (sell.exchange !== buy.exchange) {
+      throw new BadRequestException('Sell and buy must be from the same exchange');
     }
     if (sell.dealId || buy.dealId) {
       throw new BadRequestException('Order already belongs to a closed deal');
@@ -414,7 +453,7 @@ export class OrdersService {
       linked: true,
       dealCreated: Boolean(deal),
       deal,
-      open: await this.listOpen({}),
+      open: await this.listOpen({ exchange: parseExchange(buy.exchange) }),
     };
   }
 
@@ -437,7 +476,10 @@ export class OrdersService {
       data: { matchedBuyId: null, allocatedSz: null },
     });
 
-    return { unlinked: true, open: await this.listOpen({}) };
+    return {
+      unlinked: true,
+      open: await this.listOpen({ exchange: parseExchange(sell.exchange) }),
+    };
   }
 
   async archive(orderId: number) {
@@ -474,7 +516,10 @@ export class OrdersService {
       data: { archivedAt: new Date() },
     });
 
-    return { archived: true, open: await this.listOpen({}) };
+    return {
+      archived: true,
+      open: await this.listOpen({ exchange: parseExchange(order.exchange) }),
+    };
   }
 
   async unarchive(orderId: number) {
@@ -491,7 +536,10 @@ export class OrdersService {
       data: { archivedAt: null },
     });
 
-    return { unarchived: true, open: await this.listOpen({}) };
+    return {
+      unarchived: true,
+      open: await this.listOpen({ exchange: parseExchange(order.exchange) }),
+    };
   }
 
   async stake(orderId: number) {
@@ -519,7 +567,10 @@ export class OrdersService {
       data: { stakedAt: new Date() },
     });
 
-    return { staked: true, open: await this.listOpen({}) };
+    return {
+      staked: true,
+      open: await this.listOpen({ exchange: parseExchange(order.exchange) }),
+    };
   }
 
   async unstake(orderId: number) {
@@ -536,10 +587,11 @@ export class OrdersService {
       data: { stakedAt: null },
     });
 
+    const exchange = parseExchange(order.exchange);
     return {
       unstaked: true,
-      open: await this.listOpen({}),
-      staking: await this.listStaking({}),
+      open: await this.listOpen({ exchange }),
+      staking: await this.listStaking({ exchange }),
     };
   }
 
@@ -562,6 +614,7 @@ export class OrdersService {
     const deal = await this.prisma.$transaction(async (tx) => {
       const created = await tx.deal.create({
         data: {
+          exchange: buy.exchange,
           instId: buy.instId,
           buyOrderId: buy.id,
           buySz: formatNum(stats.buySz),
@@ -590,8 +643,8 @@ export class OrdersService {
     return deal;
   }
 
-  async upsertFromOkx(payload: OkxOrderPayload) {
-    const filledAt = this.parseOkxTime(
+  async upsertFill(exchange: Exchange, payload: FillPayload) {
+    const filledAt = this.parseFillTime(
       payload.fillTime || payload.uTime || payload.cTime,
     );
 
@@ -613,12 +666,16 @@ export class OrdersService {
     };
 
     const existing = await this.prisma.order.findUnique({
-      where: { ordId: payload.ordId },
+      where: {
+        exchange_ordId: { exchange, ordId: payload.ordId },
+      },
     });
 
     const order = await this.prisma.order.upsert({
-      where: { ordId: payload.ordId },
-      create: { ordId: payload.ordId, ...data },
+      where: {
+        exchange_ordId: { exchange, ordId: payload.ordId },
+      },
+      create: { exchange, ordId: payload.ordId, ...data },
       update: data,
     });
 
@@ -636,14 +693,20 @@ export class OrdersService {
     return { order, shouldNotify, previous: existing };
   }
 
-  async markNotified(ordId: string) {
+  async upsertFromOkx(payload: FillPayload) {
+    return this.upsertFill('okx', payload);
+  }
+
+  async markNotified(exchange: Exchange, ordId: string) {
     return this.prisma.order.update({
-      where: { ordId },
+      where: {
+        exchange_ordId: { exchange, ordId },
+      },
       data: { notifiedAt: new Date() },
     });
   }
 
-  private parseOkxTime(value?: string): Date | null {
+  private parseFillTime(value?: string): Date | null {
     if (!value) return null;
     const n = Number(value);
     if (!Number.isFinite(n)) return null;

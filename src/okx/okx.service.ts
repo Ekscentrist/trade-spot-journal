@@ -236,13 +236,16 @@ export class OkxService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const { order, shouldNotify } = await this.ordersService.upsertFromOkx(item);
+    const { order, shouldNotify } = await this.ordersService.upsertFill(
+      'okx',
+      item,
+    );
     if (shouldNotify) {
       const ok = await this.telegramService.sendMessage(
-        this.telegramService.formatOrderMessage(order),
+        this.telegramService.formatOrderMessage(order, 'okx'),
       );
       if (ok) {
-        await this.ordersService.markNotified(order.ordId);
+        await this.ordersService.markNotified('okx', order.ordId);
       }
     }
   }
@@ -296,7 +299,7 @@ export class OkxService implements OnModuleInit, OnModuleDestroy {
       for (const item of json.data || []) {
         if (item.state === 'filled' || item.state === 'partially_filled') {
           // Persist only — Telegram is for live WS fills to avoid spam on restart.
-          await this.ordersService.upsertFromOkx(item);
+          await this.ordersService.upsertFill('okx', item);
         }
       }
 

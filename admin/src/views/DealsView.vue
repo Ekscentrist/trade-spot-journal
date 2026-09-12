@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from '../api'
+import { exchange, exchangeQuery } from '../exchange'
 
 type Deal = {
   id: number
@@ -31,11 +32,17 @@ type Deal = {
   }>
 }
 
-const INST_KEY = 'trade_deals_instIds'
+const LEGACY_INST_KEY = 'trade_deals_instIds'
 
-function readStoredInstIds(): string[] {
+function instStorageKey(ex: string) {
+  return `trade_deals_instIds_${ex}`
+}
+
+function readStoredInstIds(ex: string): string[] {
   try {
-    const raw = localStorage.getItem(INST_KEY)
+    const raw =
+      localStorage.getItem(instStorageKey(ex)) ||
+      (ex === 'okx' ? localStorage.getItem(LEGACY_INST_KEY) : null)
     if (!raw) return []
     const parsed = JSON.parse(raw)
     return Array.isArray(parsed)
@@ -48,7 +55,7 @@ function readStoredInstIds(): string[] {
 
 const deals = ref<Deal[]>([])
 const instruments = ref<string[]>([])
-const selectedInstIds = ref<string[]>(readStoredInstIds())
+const selectedInstIds = ref<string[]>(readStoredInstIds(exchange.value))
 const instrumentsOpen = ref(false)
 const error = ref('')
 const loading = ref(false)
@@ -114,18 +121,19 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const available = await api<string[]>('/deals/instruments')
+    const available = await api<string[]>(`/deals/instruments${exchangeQuery()}`)
     instruments.value = available
     selectedInstIds.value = selectedInstIds.value.filter((id) =>
       available.includes(id),
     )
 
-    const params = new URLSearchParams()
-    if (selectedInstIds.value.length) {
-      params.set('instIds', selectedInstIds.value.join(','))
-    }
-    const qs = params.toString() ? `?${params.toString()}` : ''
-    deals.value = await api<Deal[]>(`/deals${qs}`)
+    deals.value = await api<Deal[]>(
+      `/deals${exchangeQuery(
+        selectedInstIds.value.length
+          ? { instIds: selectedInstIds.value.join(',') }
+          : undefined,
+      )}`,
+    )
   } catch (e) {
     error.value = (e as Error).message
   } finally {
@@ -136,10 +144,15 @@ async function load() {
 watch(
   selectedInstIds,
   (value) => {
-    localStorage.setItem(INST_KEY, JSON.stringify(value))
+    localStorage.setItem(instStorageKey(exchange.value), JSON.stringify(value))
   },
   { deep: true },
 )
+
+watch(exchange, (ex) => {
+  selectedInstIds.value = readStoredInstIds(ex)
+  void load()
+})
 
 onMounted(() => {
   document.addEventListener('click', onDocumentClick)

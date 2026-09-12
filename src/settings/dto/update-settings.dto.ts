@@ -15,6 +15,18 @@ export class UpdateSettingsDto {
 
   @IsOptional()
   @IsString()
+  bitgetApiKey?: string;
+
+  @IsOptional()
+  @IsString()
+  bitgetSecret?: string;
+
+  @IsOptional()
+  @IsString()
+  bitgetPassphrase?: string;
+
+  @IsOptional()
+  @IsString()
   telegramBotToken?: string;
 
   @IsOptional()
