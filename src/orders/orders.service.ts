@@ -665,36 +665,65 @@ export class OrdersService {
       filledAt,
     };
 
-    const existing = await this.prisma.order.findUnique({
-      where: {
-        exchange_ordId: { exchange, ordId: payload.ordId },
-      },
-    });
+    const where = {
+      exchange_ordId: { exchange, ordId: payload.ordId },
+    };
 
-    const order = await this.prisma.order.upsert({
-      where: {
-        exchange_ordId: { exchange, ordId: payload.ordId },
-      },
-      create: { exchange, ordId: payload.ordId, ...data },
-      update: data,
-    });
+    const existing = await this.prisma.order.findUnique({ where });
 
+    let order;
+    try {
+      order = await this.prisma.order.upsert({
+        where,
+        create: { exchange, ordId: payload.ordId, ...data },
+        update: data,
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        order = await this.prisma.order.update({
+          where,
+          data,
+        });
+      } else {
+        throw error;
+      }
+    }
+
+    // Re-read after write so concurrent handlers see the latest notifiedAt.
+    const latest = await this.prisma.order.findUnique({ where });
+    const prior = existing ?? latest;
     const isFill =
       payload.state === 'filled' || payload.state === 'partially_filled';
-    const stateChanged = !existing || existing.state !== payload.state;
+    const stateChanged = !prior || prior.state !== payload.state;
     const fillIncreased =
-      existing &&
-      payload.accFillSz &&
-      existing.accFillSz !== payload.accFillSz;
+      Boolean(prior) &&
+      Boolean(payload.accFillSz) &&
+      prior!.accFillSz !== payload.accFillSz;
 
     const shouldNotify =
-      isFill && (!existing?.notifiedAt || stateChanged || Boolean(fillIncreased));
+      isFill &&
+      (!latest?.notifiedAt || stateChanged || fillIncreased);
 
     return { order, shouldNotify, previous: existing };
   }
 
   async upsertFromOkx(payload: FillPayload) {
     return this.upsertFill('okx', payload);
+  }
+
+  async listUnnotifiedFills(exchange: Exchange) {
+    return this.prisma.order.findMany({
+      where: {
+        exchange,
+        notifiedAt: null,
+        state: { in: ['filled', 'partially_filled'] },
+      },
+      orderBy: [{ filledAt: 'asc' }, { id: 'asc' }],
+      select: orderSelect,
+    });
   }
 
   async markNotified(exchange: Exchange, ordId: string) {

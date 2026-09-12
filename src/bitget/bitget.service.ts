@@ -95,6 +95,17 @@ function parseFee(item: BitgetOrderRaw): { fee?: string; feeCcy?: string } {
   return {};
 }
 
+function normalizeBitgetState(raw: string): string {
+  const state = raw.trim().toLowerCase();
+  if (state === 'partial_fill' || state === 'partiallyfilled') {
+    return 'partially_filled';
+  }
+  if (state === 'full_fill' || state === 'full_filled' || state === 'fully_filled') {
+    return 'filled';
+  }
+  return state;
+}
+
 function toFillPayload(item: BitgetOrderRaw): FillPayload | null {
   const ordId = String(item.orderId || '');
   const symbol = String(item.instId || item.symbol || '');
@@ -106,7 +117,7 @@ function toFillPayload(item: BitgetOrderRaw): FillPayload | null {
     instId: bitgetSymbolToInstId(symbol),
     side: String(item.side || '').toLowerCase(),
     ordType: item.orderType,
-    state: String(item.status || item.state || ''),
+    state: normalizeBitgetState(String(item.status || item.state || '')),
     px: item.price,
     sz: item.size,
     fillPx: item.fillPrice || item.priceAvg,
@@ -138,6 +149,7 @@ export class BitgetService implements OnModuleInit, OnModuleDestroy {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private pingTimer: NodeJS.Timeout | null = null;
   private stopped = false;
+  private messageChain: Promise<void> = Promise.resolve();
   private status: ConnectionStatus = {
     connected: false,
     loggedIn: false,
@@ -253,7 +265,14 @@ export class BitgetService implements OnModuleInit, OnModuleDestroy {
     });
 
     ws.on('message', (raw) => {
-      void this.onMessage(raw.toString());
+      const text = raw.toString();
+      this.messageChain = this.messageChain
+        .then(() => this.onMessage(text))
+        .catch((error) => {
+          this.logger.error(
+            `Bitget message handler error: ${(error as Error).message}`,
+          );
+        });
     });
 
     ws.on('close', () => {
@@ -324,7 +343,7 @@ export class BitgetService implements OnModuleInit, OnModuleDestroy {
         this.status.lastError = null;
         this.logger.log('Bitget WS logged in');
         this.subscribeOrders();
-        void this.syncRecentOrders();
+        void this.syncRecentOrders().then(() => this.notifyPendingFills());
       } else {
         this.status.loggedIn = false;
         this.status.lastError = String(msg.msg || 'login failed');
@@ -347,7 +366,13 @@ export class BitgetService implements OnModuleInit, OnModuleDestroy {
     const arg = msg.arg as { channel?: string } | undefined;
     if (arg?.channel === 'orders' && Array.isArray(msg.data)) {
       for (const item of msg.data as BitgetOrderRaw[]) {
-        await this.handleOrderUpdate(item);
+        try {
+          await this.handleOrderUpdate(item);
+        } catch (error) {
+          this.logger.error(
+            `Bitget order update failed: ${(error as Error).message}`,
+          );
+        }
       }
     }
   }
@@ -361,12 +386,47 @@ export class BitgetService implements OnModuleInit, OnModuleDestroy {
       payload,
     );
     if (shouldNotify) {
-      const ok = await this.telegramService.sendMessage(
-        this.telegramService.formatOrderMessage(order, 'bitget'),
-      );
-      if (ok) {
-        await this.ordersService.markNotified('bitget', order.ordId);
+      await this.notifyOrder(order);
+    }
+  }
+
+  private async notifyOrder(order: {
+    instId: string;
+    side: string;
+    state: string;
+    ordType?: string | null;
+    px?: string | null;
+    avgPx?: string | null;
+    fillPx?: string | null;
+    sz?: string | null;
+    accFillSz?: string | null;
+    fee?: string | null;
+    feeCcy?: string | null;
+    ordId: string;
+  }) {
+    const ok = await this.telegramService.sendMessage(
+      this.telegramService.formatOrderMessage(order, 'bitget'),
+    );
+    if (ok) {
+      await this.ordersService.markNotified('bitget', order.ordId);
+    }
+  }
+
+  private async notifyPendingFills() {
+    try {
+      const pending = await this.ordersService.listUnnotifiedFills('bitget');
+      for (const order of pending) {
+        await this.notifyOrder(order);
       }
+      if (pending.length) {
+        this.logger.log(
+          `Bitget backfilled ${pending.length} Telegram notification(s)`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        `Bitget pending notify failed: ${(error as Error).message}`,
+      );
     }
   }
 
@@ -392,7 +452,7 @@ export class BitgetService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const path = '/api/v2/spot/trade/orders-history?limit=50';
+    const path = '/api/v2/spot/trade/history-orders?limit=50';
     const timestamp = Date.now().toString();
     const sign = this.signRest(
       timestamp,

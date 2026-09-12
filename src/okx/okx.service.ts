@@ -28,6 +28,7 @@ export class OkxService implements OnModuleInit, OnModuleDestroy {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private pingTimer: NodeJS.Timeout | null = null;
   private stopped = false;
+  private messageChain: Promise<void> = Promise.resolve();
   private status: ConnectionStatus = {
     connected: false,
     loggedIn: false,
@@ -135,7 +136,14 @@ export class OkxService implements OnModuleInit, OnModuleDestroy {
     });
 
     ws.on('message', (raw) => {
-      void this.onMessage(raw.toString());
+      const text = raw.toString();
+      this.messageChain = this.messageChain
+        .then(() => this.onMessage(text))
+        .catch((error) => {
+          this.logger.error(
+            `OKX message handler error: ${(error as Error).message}`,
+          );
+        });
     });
 
     ws.on('close', () => {
@@ -223,7 +231,13 @@ export class OkxService implements OnModuleInit, OnModuleDestroy {
     const arg = msg.arg as { channel?: string } | undefined;
     if (arg?.channel === 'orders' && Array.isArray(msg.data)) {
       for (const item of msg.data as OkxOrderPayload[]) {
-        await this.handleOrderUpdate(item);
+        try {
+          await this.handleOrderUpdate(item);
+        } catch (error) {
+          this.logger.error(
+            `OKX order update failed: ${(error as Error).message}`,
+          );
+        }
       }
     }
   }
@@ -231,7 +245,6 @@ export class OkxService implements OnModuleInit, OnModuleDestroy {
   private async handleOrderUpdate(item: OkxOrderPayload) {
     if (!item?.ordId || !item.instId) return;
     if (item.state !== 'filled' && item.state !== 'partially_filled') {
-      // still upsert live/canceled for completeness? plan says fill states
       // keep only fill-related in DB for admin list
       return;
     }
