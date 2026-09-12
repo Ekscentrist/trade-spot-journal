@@ -111,11 +111,18 @@ function formatTotal(value: number) {
 }
 
 function price(o: OrderRow) {
-  return o.avgPx || o.fillPx || o.px || '—'
+  return prettyNum(o.avgPx || o.fillPx || o.px)
 }
 
 function size(o: OrderRow) {
-  return o.allocatedSz || o.accFillSz || o.sz || '—'
+  return prettyNum(o.allocatedSz || o.accFillSz || o.sz)
+}
+
+function prettyNum(value?: string | null) {
+  if (value == null || value === '') return '—'
+  const n = Number(value)
+  if (!Number.isFinite(n)) return value
+  return n.toFixed(16).replace(/\.?0+$/, '') || '0'
 }
 
 function fmt(dt: string | null) {

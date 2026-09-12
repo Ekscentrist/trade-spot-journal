@@ -54,6 +54,17 @@ export function formatNum(value: number, digits = 8): string {
   return fixed.replace(/\.?0+$/, '') || '0';
 }
 
+/** Strip float noise / trailing zeros from exchange numeric strings. */
+export function cleanDecimal(
+  value?: string | null,
+  digits = 16,
+): string | null {
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return value;
+  return formatNum(n, digits);
+}
+
 export type PnlParts = {
   buySz: number;
   buyAvgPx: number;
