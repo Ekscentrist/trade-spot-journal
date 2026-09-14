@@ -183,6 +183,11 @@ function toggleInstrument(instId: string) {
   void load()
 }
 
+function selectInstrument(instId: string) {
+  selectedInstIds.value = [instId]
+  void load()
+}
+
 function clearInstruments() {
   selectedInstIds.value = []
   void load()
@@ -522,7 +527,7 @@ onUnmounted(() => {
         >
           <div class="card-top">
             <span class="badge buy">buy</span>
-            <strong>{{ buy.instId }}</strong>
+            <strong class="coin-link" @click.stop="selectInstrument(buy.instId)">{{ buy.instId }}</strong>
             <span class="muted">{{ fmt(buy.filledAt) }}</span>
             <button
               class="linkish"
@@ -587,7 +592,7 @@ onUnmounted(() => {
             >
               <div class="card-top">
                 <span class="badge warn">archived</span>
-                <strong>{{ buy.instId }}</strong>
+                <strong class="coin-link" @click.stop="selectInstrument(buy.instId)">{{ buy.instId }}</strong>
                 <button class="linkish" type="button" @click="unarchive(buy.id)">Restore</button>
               </div>
               <div class="meta">
@@ -614,7 +619,7 @@ onUnmounted(() => {
         >
           <div class="card-top">
             <span class="badge sell">sell</span>
-            <strong>{{ sell.instId }}</strong>
+            <strong class="coin-link" @click.stop="selectInstrument(sell.instId)">{{ sell.instId }}</strong>
             <span class="muted">drag me</span>
             <button class="linkish dangerish" type="button" @click.stop="archive(sell.id)">
               Archive
@@ -646,7 +651,7 @@ onUnmounted(() => {
             >
               <div class="card-top">
                 <span class="badge warn">archived</span>
-                <strong>{{ sell.instId }}</strong>
+                <strong class="coin-link" @click.stop="selectInstrument(sell.instId)">{{ sell.instId }}</strong>
                 <button class="linkish" type="button" @click="unarchive(sell.id)">Restore</button>
               </div>
               <div class="meta">
@@ -731,6 +736,8 @@ p { margin: 0.2rem 0 0; color: var(--muted); }
   color: var(--muted);
   font-size: 0.82rem;
 }
+.coin-link { cursor: pointer; }
+.coin-link:hover { text-decoration: underline; }
 .linkish {
   background: transparent;
   color: #93c5fd;
