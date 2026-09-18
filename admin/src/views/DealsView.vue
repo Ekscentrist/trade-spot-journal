@@ -19,15 +19,30 @@ type Deal = {
   quoteCcy: string | null
   closedAt: string
   createdAt: string
-  buyOrder: { id: number; ordId: string; filledAt: string | null }
+  buyOrder: {
+    id: number
+    ordId: string
+    filledAt: string | null
+    sz?: string | null
+    accFillSz?: string | null
+    px?: string | null
+    avgPx?: string | null
+    fillPx?: string | null
+    fee?: string | null
+    feeCcy?: string | null
+  }
   orders: Array<{
     id: number
     ordId: string
+    sz?: string | null
+    accFillSz?: string | null
     allocatedSz: string | null
+    px?: string | null
     avgPx: string | null
     fillPx: string | null
     fee: string | null
     feeCcy: string | null
+    ordType?: string | null
     filledAt: string | null
   }>
 }
@@ -60,6 +75,37 @@ const instrumentsOpen = ref(false)
 const error = ref('')
 const loading = ref(false)
 const dropdownRoot = ref<HTMLElement | null>(null)
+const activeDealModal = ref<Deal | null>(null)
+
+function openDealModal(deal: Deal) {
+  activeDealModal.value = deal
+}
+
+function closeDealModal() {
+  activeDealModal.value = null
+}
+
+function onKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && activeDealModal.value) {
+    closeDealModal()
+  }
+}
+
+function sellSize(order: Deal['orders'][number]) {
+  return order.allocatedSz || order.accFillSz || order.sz || '—'
+}
+
+function sellPrice(order: Deal['orders'][number]) {
+  return order.avgPx || order.fillPx || order.px || '—'
+}
+
+function sellTotal(order: Deal['orders'][number], quoteCcy: string | null) {
+  const sz = Number(order.allocatedSz || order.accFillSz || order.sz)
+  const px = Number(order.avgPx || order.fillPx || order.px)
+  if (!Number.isFinite(sz) || !Number.isFinite(px)) return '—'
+  const val = (sz * px).toFixed(6).replace(/\.?0+$/, '')
+  return `${val} ${quoteCcy || ''}`.trim()
+}
 
 const selectedLabel = computed(() => {
   if (!selectedInstIds.value.length) return 'All coins'
@@ -166,11 +212,13 @@ watch(exchange, (ex) => {
 
 onMounted(() => {
   document.addEventListener('click', onDocumentClick)
+  document.addEventListener('keydown', onKeydown)
   void load()
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', onDocumentClick)
+  document.removeEventListener('keydown', onKeydown)
 })
 </script>
 
@@ -251,13 +299,105 @@ onUnmounted(() => {
                 {{ d.pnl }} {{ d.quoteCcy || '' }}
               </strong>
             </td>
-            <td>{{ d.orders.length }}</td>
+            <td>
+              <button
+                type="button"
+                class="sells-btn"
+                title="Click to view sales details"
+                @click.stop="openDealModal(d)"
+              >
+                {{ d.orders.length }}
+              </button>
+            </td>
           </tr>
           <tr v-if="!deals.length">
             <td colspan="7" class="empty">No closed deals yet</td>
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- Modal for Sells Details -->
+    <div
+      v-if="activeDealModal"
+      class="modal-backdrop"
+      @click.self="closeDealModal"
+    >
+      <div class="modal-card">
+        <div class="modal-header">
+          <div class="modal-title">
+            <h3>Deal Details</h3>
+            <span class="badge buy">{{ activeDealModal.instId }}</span>
+            <span class="muted">· Closed {{ fmt(activeDealModal.closedAt) }}</span>
+          </div>
+          <button type="button" class="close-btn" title="Close" @click="closeDealModal">✕</button>
+        </div>
+
+        <div class="modal-summary-grid">
+          <div class="modal-summary-item">
+            <span class="muted">Buy Order</span>
+            <strong>{{ activeDealModal.buySz }} @ {{ activeDealModal.buyAvgPx }}</strong>
+            <span class="summary-sub">
+              Fee: {{ activeDealModal.buyFee ? `${activeDealModal.buyFee} ${activeDealModal.buyFeeCcy || ''}`.trim() : '—' }}
+            </span>
+          </div>
+          <div class="modal-summary-item">
+            <span class="muted">Total Sells</span>
+            <strong>{{ activeDealModal.sellSz }} @ {{ activeDealModal.sellAvgPx }}</strong>
+            <span class="summary-sub">
+              Fee: {{ activeDealModal.sellFee ? `${activeDealModal.sellFee} ${activeDealModal.sellFeeCcy || ''}`.trim() : '—' }}
+            </span>
+          </div>
+          <div class="modal-summary-item">
+            <span class="muted">Net PnL</span>
+            <strong :class="Number(activeDealModal.pnl) >= 0 ? 'pos' : 'neg'" class="pnl-val">
+              {{ Number(activeDealModal.pnl) >= 0 ? '+' : '' }}{{ activeDealModal.pnl }} {{ activeDealModal.quoteCcy || '' }}
+            </strong>
+            <span class="summary-sub">
+              {{ activeDealModal.orders.length }} sell order{{ activeDealModal.orders.length === 1 ? '' : 's' }}
+            </span>
+          </div>
+        </div>
+
+        <div class="modal-section-title">
+          <span>Sell Orders Breakdown</span>
+          <span class="muted">({{ activeDealModal.orders.length }})</span>
+        </div>
+
+        <div class="modal-table-wrap">
+          <table class="modal-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Filled At</th>
+                <th>Size</th>
+                <th>Price</th>
+                <th>Total</th>
+                <th>Fee</th>
+                <th>Order ID</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(sell, idx) in activeDealModal.orders" :key="sell.id">
+                <td class="muted">{{ idx + 1 }}</td>
+                <td>{{ fmt(sell.filledAt) }}</td>
+                <td><strong>{{ sellSize(sell) }}</strong></td>
+                <td>{{ sellPrice(sell) }}</td>
+                <td>{{ sellTotal(sell, activeDealModal.quoteCcy) }}</td>
+                <td>{{ sell.fee ? `${sell.fee} ${sell.feeCcy || ''}`.trim() : '—' }}</td>
+                <td><code class="ord-id" :title="sell.ordId">{{ sell.ordId }}</code></td>
+              </tr>
+              <tr v-if="!activeDealModal.orders.length">
+                <td colspan="7" class="empty">No sell orders found</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="modal-actions">
+          <button class="secondary" type="button" @click="closeDealModal">Close</button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -364,4 +504,158 @@ p { margin: 0.2rem 0 0; color: var(--muted); }
 .pos { color: var(--buy); }
 .neg { color: var(--sell); }
 .muted { color: var(--muted); font-size: 0.9rem; font-weight: 400; }
+
+.sells-btn {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 0.2rem 0.65rem;
+  font-weight: 600;
+  font-size: 0.88rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  transition: all 0.15s ease;
+}
+.sells-btn:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.3);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1.25rem;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.modal-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.55);
+  width: 100%;
+  max-width: 760px;
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
+  padding: 1.5rem;
+  animation: scaleIn 0.15s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modal-title {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.modal-title h3 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.close-btn {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  font-size: 1.2rem;
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+  border-radius: 6px;
+  line-height: 1;
+}
+.close-btn:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+
+.modal-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+  background: var(--bg-elevated);
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+}
+
+.modal-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.92rem;
+}
+
+.summary-sub {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.pnl-val {
+  font-size: 1.05rem;
+}
+
+.modal-section-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.modal-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+}
+
+.modal-table th,
+.modal-table td {
+  padding: 0.65rem 0.75rem;
+  font-size: 0.88rem;
+}
+
+.ord-id {
+  font-size: 0.8rem;
+  font-family: monospace;
+  color: var(--muted);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
 </style>
