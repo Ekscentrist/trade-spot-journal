@@ -193,6 +193,11 @@ function clearInstruments() {
   void load()
 }
 
+function resetFilters() {
+  selectedInstIds.value = []
+  void load()
+}
+
 function onDocumentClick(event: MouseEvent) {
   if (!dropdownRoot.value) return
   if (!dropdownRoot.value.contains(event.target as Node)) {
@@ -452,7 +457,6 @@ onUnmounted(() => {
     <div class="head">
       <div>
         <h1>Orders</h1>
-        <p>Drag a sell onto a buy to link. Close at ≥99% → Deal.</p>
       </div>
       <div class="actions">
         <div class="unrealized">
@@ -487,7 +491,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <button class="secondary" type="button" :disabled="loading" @click="load">Refresh</button>
+        <button class="secondary" type="button" :disabled="loading" @click="resetFilters">Reset</button>
       </div>
     </div>
 
@@ -736,8 +740,13 @@ p { margin: 0.2rem 0 0; color: var(--muted); }
   color: var(--muted);
   font-size: 0.82rem;
 }
-.coin-link { cursor: pointer; }
-.coin-link:hover { text-decoration: underline; }
+.coin-link {
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+.coin-link:hover {
+  color: var(--ok);
+}
 .linkish {
   background: transparent;
   color: #93c5fd;

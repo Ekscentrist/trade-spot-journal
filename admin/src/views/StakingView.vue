@@ -147,7 +147,17 @@ function toggleInstrument(instId: string) {
   void load()
 }
 
+function selectInstrument(instId: string) {
+  selectedInstIds.value = [instId]
+  void load()
+}
+
 function clearInstruments() {
+  selectedInstIds.value = []
+  void load()
+}
+
+function resetFilters() {
   selectedInstIds.value = []
   void load()
 }
@@ -326,7 +336,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <button class="secondary" type="button" :disabled="loading" @click="load">Refresh</button>
+        <button class="secondary" type="button" :disabled="loading" @click="resetFilters">Reset</button>
       </div>
     </div>
 
@@ -337,7 +347,7 @@ onUnmounted(() => {
     <article v-for="buy in buys" :key="buy.id" class="card">
       <div class="card-top">
         <span class="badge warn">staked</span>
-        <strong>{{ buy.instId }}</strong>
+        <strong class="coin-link" @click.stop="selectInstrument(buy.instId)">{{ buy.instId }}</strong>
         <span class="muted">{{ fmt(buy.stakedAt) }}</span>
         <button class="linkish" type="button" @click="unstake(buy.id)">Unstake</button>
       </div>
@@ -435,6 +445,13 @@ p { margin: 0.2rem 0 0; color: var(--muted); }
   padding: 0.35rem 0.45rem 0.55rem;
   color: var(--muted);
   font-size: 0.82rem;
+}
+.coin-link {
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+.coin-link:hover {
+  color: var(--ok);
 }
 .linkish {
   background: transparent;

@@ -27,7 +27,6 @@ function onExchangeChange(event: Event) {
 <template>
   <div class="shell">
     <header v-if="authed" class="top">
-      <div class="brand">Trade</div>
       <nav>
         <RouterLink to="/">Orders</RouterLink>
         <RouterLink to="/staking">Staking</RouterLink>

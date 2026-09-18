@@ -105,7 +105,17 @@ function toggleInstrument(instId: string) {
   void load()
 }
 
+function selectInstrument(instId: string) {
+  selectedInstIds.value = [instId]
+  void load()
+}
+
 function clearInstruments() {
+  selectedInstIds.value = []
+  void load()
+}
+
+function resetFilters() {
   selectedInstIds.value = []
   void load()
 }
@@ -189,7 +199,7 @@ onUnmounted(() => {
             <div v-if="!instruments.length" class="empty-mini">No deals yet</div>
           </div>
         </div>
-        <button class="secondary" type="button" :disabled="loading" @click="load">Refresh</button>
+        <button class="secondary" type="button" :disabled="loading" @click="resetFilters">Reset</button>
       </div>
     </div>
 
@@ -228,7 +238,7 @@ onUnmounted(() => {
         <tbody>
           <tr v-for="d in deals" :key="d.id">
             <td>{{ fmt(d.closedAt) }}</td>
-            <td>{{ d.instId }}</td>
+            <td><strong class="coin-link" @click.stop="selectInstrument(d.instId)">{{ d.instId }}</strong></td>
             <td>{{ d.buySz }} @ {{ d.buyAvgPx }}</td>
             <td>{{ d.sellSz }} @ {{ d.sellAvgPx }}</td>
             <td>
@@ -299,6 +309,13 @@ p { margin: 0.2rem 0 0; color: var(--muted); }
   padding: 0.35rem 0.45rem 0.55rem;
   color: var(--muted);
   font-size: 0.82rem;
+}
+.coin-link {
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+.coin-link:hover {
+  color: var(--ok);
 }
 .linkish {
   background: transparent;
