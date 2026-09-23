@@ -129,7 +129,9 @@ let earnInFlight = false
 
 const earnBalances = ref<StableBalances | null>(null)
 const earnBusy = ref('')
-const showEarnPanel = computed(() => exchange.value === 'okx')
+const earnApiBase = computed(() =>
+  exchange.value === 'bitget' ? '/bitget/earn' : '/okx/earn',
+)
 const withdrawAmts = WITHDRAW_AMTS
 const stableRows = STABLE_ROWS
 
@@ -294,14 +296,10 @@ function startMtmPoll() {
 }
 
 async function loadEarnBalances(silent = false) {
-  if (!showEarnPanel.value) {
-    earnBalances.value = null
-    return
-  }
   if (earnInFlight) return
   earnInFlight = true
   try {
-    earnBalances.value = await api<StableBalances>('/okx/earn/balances')
+    earnBalances.value = await api<StableBalances>(`${earnApiBase.value}/balances`)
   } catch (e) {
     if (!silent) error.value = (e as Error).message
   } finally {
@@ -318,7 +316,7 @@ function stopEarnPoll() {
 
 function startEarnPoll() {
   stopEarnPoll()
-  if (!showEarnPanel.value || document.visibilityState === 'hidden') return
+  if (document.visibilityState === 'hidden') return
   earnTimer = setInterval(() => {
     void loadEarnBalances(true)
   }, EARN_POLL_MS)
@@ -329,7 +327,7 @@ async function depositAllEarn(ccy: 'USDT' | 'USDC') {
   error.value = ''
   message.value = ''
   try {
-    earnBalances.value = await api<StableBalances>('/okx/earn/deposit', {
+    earnBalances.value = await api<StableBalances>(`${earnApiBase.value}/deposit`, {
       method: 'POST',
       body: JSON.stringify({ ccy }),
     })
@@ -346,7 +344,7 @@ async function withdrawEarn(ccy: 'USDT' | 'USDC', amt: number) {
   error.value = ''
   message.value = ''
   try {
-    earnBalances.value = await api<StableBalances>('/okx/earn/withdraw', {
+    earnBalances.value = await api<StableBalances>(`${earnApiBase.value}/withdraw`, {
       method: 'POST',
       body: JSON.stringify({ ccy, amt }),
     })
@@ -536,6 +534,7 @@ watch(
 
 watch(exchange, (ex) => {
   selectedInstIds.value = readStoredInstIds(ex)
+  earnBalances.value = null
   void load().then(() => {
     startMtmPoll()
     void loadEarnBalances(true)
@@ -622,7 +621,7 @@ onUnmounted(() => {
       <span v-if="conn.lastEventAt" class="muted">last event {{ fmt(conn.lastEventAt) }}</span>
     </div>
 
-    <div v-if="showEarnPanel" class="earn-bar">
+    <div class="earn-bar">
       <div
         v-for="row in stableRows"
         :key="row.ccy"

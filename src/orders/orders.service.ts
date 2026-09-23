@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { BitgetEarnFundService } from '../bitget/bitget-earn-fund.service.js';
 import { type Exchange, parseExchange } from '../exchange.js';
 import { OkxEarnFundService } from '../okx/okx-earn-fund.service.js';
 import { DUST_AMT, parseBaseCcy } from '../okx/okx-rest.js';
@@ -76,6 +77,7 @@ export class OrdersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly okxEarnFundService: OkxEarnFundService,
+    private readonly bitgetEarnFundService: BitgetEarnFundService,
   ) {}
 
   async list(params: {
@@ -582,9 +584,7 @@ export class OrdersService {
       data: { stakedAt: new Date() },
     });
 
-    if (parseExchange(order.exchange) === 'okx') {
-      await this.moveOkxEarnForBuy(order, 'stake');
-    }
+    await this.moveEarnForBuy(order, 'stake');
 
     return {
       staked: true,
@@ -614,9 +614,7 @@ export class OrdersService {
       data: { stakedAt: null },
     });
 
-    if (parseExchange(order.exchange) === 'okx') {
-      await this.moveOkxEarnForBuy(order, 'unstake');
-    }
+    await this.moveEarnForBuy(order, 'unstake');
 
     const exchange = parseExchange(order.exchange);
     return {
@@ -627,12 +625,13 @@ export class OrdersService {
   }
 
   /**
-   * After DB stake/unstake: move remaining base size Trading↔Earn on OKX.
+   * After DB stake/unstake: move remaining base size Spot/Trading ↔ Earn.
    * Failures notify Telegram only; never roll back stakedAt.
    */
-  private async moveOkxEarnForBuy(
+  private async moveEarnForBuy(
     order: {
       id: number;
+      exchange: string;
       instId: string;
       side: string;
       accFillSz: string | null;
@@ -645,6 +644,7 @@ export class OrdersService {
     },
     action: 'stake' | 'unstake',
   ) {
+    const exchange = parseExchange(order.exchange);
     const buySz = orderSize(order);
     const linkedSz = order.matchedSells.reduce(
       (sum, item) => sum + (parseNum(item.allocatedSz) || orderSize(item)),
@@ -653,7 +653,7 @@ export class OrdersService {
     const remaining = Math.max(buySz - linkedSz, 0);
     if (remaining <= DUST_AMT) {
       this.logger.debug(
-        `OKX Earn ${action} skip order #${order.id}: remaining size 0`,
+        `${exchange} Earn ${action} skip order #${order.id}: remaining size 0`,
       );
       return;
     }
@@ -662,6 +662,23 @@ export class OrdersService {
     if (!ccy) return;
 
     const context = `${action} BUY ${order.instId} #${order.id}`;
+    if (exchange === 'bitget') {
+      if (action === 'stake') {
+        await this.bitgetEarnFundService.moveSpotToEarn({
+          ccy,
+          amt: remaining,
+          context,
+        });
+      } else {
+        await this.bitgetEarnFundService.moveEarnToSpot({
+          ccy,
+          amt: remaining,
+          context,
+        });
+      }
+      return;
+    }
+
     if (action === 'stake') {
       await this.okxEarnFundService.moveTradingToEarn({
         ccy,
