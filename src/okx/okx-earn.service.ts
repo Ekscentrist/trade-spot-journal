@@ -20,7 +20,7 @@ const RETRY_DELAY_MS = 2000;
 const MAX_ATTEMPTS = 3;
 
 /** Extra redeemed above liab so dust/rounding (e.g. 0.01 USDT) still gets repaid. */
-const STABLE_REDEEM_BUFFER = 0.02;
+const STABLE_REDEEM_BUFFER = 0.05;
 const STABLE_CCY = new Set(['USDT', 'USDC', 'USD', 'EUR']);
 
 function redeemBuffer(ccy: string, remaining: number): number {
@@ -28,6 +28,9 @@ function redeemBuffer(ccy: string, remaining: number): number {
   // ~1% for crypto so we don't pull a huge absolute amount
   return Math.max(remaining * 0.01, DUST_AMT * 10);
 }
+
+/** Treat sub-cent USDT leftovers as still needing a full clear attempt. */
+const CLEAR_LIAB_EPS = 1e-6;
 
 type BalanceDetail = {
   ccy?: string;
@@ -372,13 +375,13 @@ export class OkxEarnService implements OnModuleDestroy {
     ccy: string,
     liab: number,
   ): Promise<void> {
-    // Repay from trading first — previous redeem may already sit there.
-    let remaining = liab;
-    const existing = await this.getTradingAvail(creds, ccy);
-    if (existing > DUST_AMT) {
-      const repaid = await this.repay(creds, ccy, Math.min(remaining, existing));
-      remaining -= repaid;
-      if (remaining <= DUST_AMT) return;
+    // 1) Burn whatever is already on trading against current debt.
+    await this.repayUntilClear(creds, ccy);
+
+    let remaining = await this.getCurrencyLiab(creds, ccy);
+    if (remaining <= CLEAR_LIAB_EPS) {
+      this.logger.log(`OKX settle: ${ccy} fully cleared from trading balance`);
+      return;
     }
 
     let earnAmt = 0;
@@ -411,6 +414,7 @@ export class OkxEarnService implements OnModuleDestroy {
       return;
     }
 
+    // Redeem liab + buffer so tiny leftovers (0.01 USDT) can be wiped.
     const buffer = redeemBuffer(ccy, remaining);
     const redeemTarget = remaining + buffer;
     const redeemAmt = Math.min(redeemTarget, earnAmt);
@@ -439,14 +443,64 @@ export class OkxEarnService implements OnModuleDestroy {
       return;
     }
 
-    // Redeem may credit Trading or Funding depending on account mode.
-    // Pull enough for full liab; leftover buffer stays on Spot — fine.
-    const tradingAvail = await this.ensureOnTradingForRepay(
-      creds,
-      ccy,
-      remaining,
+    await this.ensureOnTradingForRepay(creds, ccy, remaining + buffer);
+    await this.repayUntilClear(creds, ccy);
+
+    const left = await this.getCurrencyLiab(creds, ccy);
+    if (left > CLEAR_LIAB_EPS) {
+      this.logger.warn(
+        `OKX settle: ${ccy} still owes ${formatAmt(left)} after clear attempts`,
+      );
+      void this.telegramService.sendMessage(
+        `OKX settle incomplete\n${formatAmt(left)} ${ccy} still borrowed`,
+      );
+    } else {
+      this.logger.log(`OKX settle: ${ccy} debt fully cleared`);
+    }
+  }
+
+  /** Re-read liab and repay in a loop until debt is gone or nothing left to pay with. */
+  private async repayUntilClear(
+    creds: OkxCredentials,
+    ccy: string,
+  ): Promise<void> {
+    for (let round = 1; round <= 5; round++) {
+      const liab = await this.getCurrencyLiab(creds, ccy);
+      if (liab <= CLEAR_LIAB_EPS) return;
+
+      const avail = await this.getTradingAvail(creds, ccy);
+      if (avail <= DUST_AMT) {
+        this.logger.log(
+          `OKX repayUntilClear ${ccy}: liab=${formatAmt(liab)} but trading avail=0 (round ${round})`,
+        );
+        return;
+      }
+
+      // Pay as much as possible toward full remaining debt this round.
+      const pay = Math.min(liab, avail);
+      this.logger.log(
+        `OKX repayUntilClear ${ccy} round ${round}: pay ${formatAmt(pay)} of ${formatAmt(liab)}`,
+      );
+      const repaid = await this.repay(creds, ccy, pay);
+      if (repaid <= DUST_AMT) return;
+
+      // Rate limit between repay calls
+      await sleep(3500);
+    }
+  }
+
+  private async getCurrencyLiab(
+    creds: OkxCredentials,
+    ccy: string,
+  ): Promise<number> {
+    const details = await this.getBalanceDetails(creds);
+    const row = details.find((d) => d.ccy === ccy);
+    if (!row) return 0;
+    return Math.max(
+      parseAmt(row.liab),
+      parseAmt(row.crossLiab),
+      parseAmt(row.isoLiab),
     );
-    await this.repay(creds, ccy, Math.min(remaining, tradingAvail));
   }
 
   private async repay(
