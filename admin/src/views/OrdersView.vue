@@ -74,7 +74,7 @@ type Status = {
 const MTM_POLL_MS = 5_000
 const EARN_POLL_MS = 15_000
 const LEGACY_INST_KEY = 'trade_orders_instIds'
-const WITHDRAW_AMTS = [50, 100, 200] as const
+const WITHDRAW_AMTS = [50, 100, 200, 300, 500, 1000] as const
 const STABLE_ROWS = [
   { key: 'usdt' as const, ccy: 'USDT' as const },
   { key: 'usdc' as const, ccy: 'USDC' as const },

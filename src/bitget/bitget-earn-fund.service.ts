@@ -21,7 +21,7 @@ const PERIOD_FLEXIBLE = 'flexible';
 
 export const STABLE_CCYS = ['USDT', 'USDC'] as const;
 export type StableCcy = (typeof STABLE_CCYS)[number];
-export const WITHDRAW_AMTS = [50, 100, 200] as const;
+export const WITHDRAW_AMTS = [50, 100, 200, 300, 500, 1000] as const;
 export type WithdrawAmt = (typeof WITHDRAW_AMTS)[number];
 
 type SpotAssetRow = {
