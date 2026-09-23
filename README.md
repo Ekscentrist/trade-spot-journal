@@ -12,7 +12,7 @@
 
 ## Что умеет
 
-- Мониторинг Spot fills по API key (OKX и Bitget)
+- Мониторинг Spot fills по read-only API key (OKX и Bitget)
 - Переключение биржи в шапке админки
 - Telegram-уведомления о исполнениях
 - Ручная привязка sell → buy (drag-and-drop), частичные продажи
@@ -22,8 +22,6 @@
 - Staking: временно убрать buy из открытых с живым uPnL
 - Архивация buy/sell
 - Фильтры по монетам, JWT-админка
-- **OKX Simple Earn (Spot mode):** после buy — если монета доступна в Flexible Earn, кладётся туда; после каждого fill — проверка `liab`, redeem из Earn и погашение через `spot-manual-borrow-repay`
-
 
 ## Структура
 
@@ -64,8 +62,7 @@ cd admin && npm install && npm run dev
 ## Безопасность
 
 - В `.env` только админ-логин и БД; ключи бирж/Telegram — в Settings (маскируются в API)
-- **Bitget:** достаточно **Read**
-- **OKX:** для мониторинга — **Read**; для auto Earn/repay нужны ещё **Earn** + **Loan** (и желательно **Transfer**). **Trade** / **Withdraw** не нужны. Ограничьте ключ Trusted IP сервера.
+- Для бирж достаточно ключа **Read**
 - Не коммитьте `.env` и реальные секреты
 
 ## Лицензия
