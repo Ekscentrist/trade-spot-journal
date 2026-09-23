@@ -72,7 +72,19 @@ type Status = {
 }
 
 const MTM_POLL_MS = 5_000
+const EARN_POLL_MS = 15_000
 const LEGACY_INST_KEY = 'trade_orders_instIds'
+const WITHDRAW_AMTS = [50, 100, 200] as const
+const STABLE_ROWS = [
+  { key: 'usdt' as const, ccy: 'USDT' as const },
+  { key: 'usdc' as const, ccy: 'USDC' as const },
+]
+
+type StablePair = { spot: string; earn: string }
+type StableBalances = {
+  usdt: StablePair
+  usdc: StablePair
+}
 
 function instStorageKey(ex: string) {
   return `trade_orders_instIds_${ex}`
@@ -112,6 +124,26 @@ const draggingSellId = ref<number | null>(null)
 const dropdownRoot = ref<HTMLElement | null>(null)
 let mtmTimer: ReturnType<typeof setInterval> | null = null
 let mtmInFlight = false
+let earnTimer: ReturnType<typeof setInterval> | null = null
+let earnInFlight = false
+
+const earnBalances = ref<StableBalances | null>(null)
+const earnBusy = ref('')
+const showEarnPanel = computed(() => exchange.value === 'okx')
+const withdrawAmts = WITHDRAW_AMTS
+const stableRows = STABLE_ROWS
+
+function earnNum(value?: string | null) {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : 0
+}
+
+function fmtEarn(value?: string | null) {
+  const n = earnNum(value)
+  if (n === 0) return '0'
+  if (n >= 100) return n.toFixed(2).replace(/\.?0+$/, '')
+  return n.toFixed(4).replace(/\.?0+$/, '')
+}
 
 const selectedLabel = computed(() => {
   if (!selectedInstIds.value.length) return 'All coins'
@@ -261,13 +293,81 @@ function startMtmPoll() {
   }, MTM_POLL_MS)
 }
 
+async function loadEarnBalances(silent = false) {
+  if (!showEarnPanel.value) {
+    earnBalances.value = null
+    return
+  }
+  if (earnInFlight) return
+  earnInFlight = true
+  try {
+    earnBalances.value = await api<StableBalances>('/okx/earn/balances')
+  } catch (e) {
+    if (!silent) error.value = (e as Error).message
+  } finally {
+    earnInFlight = false
+  }
+}
+
+function stopEarnPoll() {
+  if (earnTimer != null) {
+    clearInterval(earnTimer)
+    earnTimer = null
+  }
+}
+
+function startEarnPoll() {
+  stopEarnPoll()
+  if (!showEarnPanel.value || document.visibilityState === 'hidden') return
+  earnTimer = setInterval(() => {
+    void loadEarnBalances(true)
+  }, EARN_POLL_MS)
+}
+
+async function depositAllEarn(ccy: 'USDT' | 'USDC') {
+  earnBusy.value = `deposit-${ccy}`
+  error.value = ''
+  message.value = ''
+  try {
+    earnBalances.value = await api<StableBalances>('/okx/earn/deposit', {
+      method: 'POST',
+      body: JSON.stringify({ ccy }),
+    })
+    message.value = `Spot ${ccy} → Earn`
+  } catch (e) {
+    error.value = (e as Error).message
+  } finally {
+    earnBusy.value = ''
+  }
+}
+
+async function withdrawEarn(ccy: 'USDT' | 'USDC', amt: number) {
+  earnBusy.value = `withdraw-${ccy}-${amt}`
+  error.value = ''
+  message.value = ''
+  try {
+    earnBalances.value = await api<StableBalances>('/okx/earn/withdraw', {
+      method: 'POST',
+      body: JSON.stringify({ ccy, amt }),
+    })
+    message.value = `Earn → Spot ${amt} ${ccy}`
+  } catch (e) {
+    error.value = (e as Error).message
+  } finally {
+    earnBusy.value = ''
+  }
+}
+
 function onVisibilityChange() {
   if (document.visibilityState === 'hidden') {
     stopMtmPoll()
+    stopEarnPoll()
     return
   }
   void pollMtm()
   startMtmPoll()
+  void loadEarnBalances(true)
+  startEarnPoll()
 }
 
 async function load() {
@@ -436,19 +536,28 @@ watch(
 
 watch(exchange, (ex) => {
   selectedInstIds.value = readStoredInstIds(ex)
-  void load().then(() => startMtmPoll())
+  void load().then(() => {
+    startMtmPoll()
+    void loadEarnBalances(true)
+    startEarnPoll()
+  })
 })
 
 onMounted(() => {
   document.addEventListener('click', onDocumentClick)
   document.addEventListener('visibilitychange', onVisibilityChange)
-  void load().then(() => startMtmPoll())
+  void load().then(() => {
+    startMtmPoll()
+    void loadEarnBalances(true)
+    startEarnPoll()
+  })
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', onDocumentClick)
   document.removeEventListener('visibilitychange', onVisibilityChange)
   stopMtmPoll()
+  stopEarnPoll()
 })
 </script>
 
@@ -511,6 +620,41 @@ onUnmounted(() => {
       </span>
       <span v-if="conn.lastError" class="error">{{ conn.lastError }}</span>
       <span v-if="conn.lastEventAt" class="muted">last event {{ fmt(conn.lastEventAt) }}</span>
+    </div>
+
+    <div v-if="showEarnPanel" class="earn-bar">
+      <div
+        v-for="row in stableRows"
+        :key="row.ccy"
+        class="earn-row"
+      >
+        <span class="earn-label">
+          <strong>{{ row.ccy }}</strong>
+          Spot {{ fmtEarn(earnBalances?.[row.key]?.spot) }}
+          <span class="muted">·</span>
+          Earn {{ fmtEarn(earnBalances?.[row.key]?.earn) }}
+        </span>
+        <span class="earn-actions">
+          <button
+            class="earn-btn"
+            type="button"
+            :disabled="!!earnBusy || earnNum(earnBalances?.[row.key]?.spot) <= 0"
+            @click="depositAllEarn(row.ccy)"
+          >
+            {{ earnBusy === `deposit-${row.ccy}` ? '…' : '→ Earn' }}
+          </button>
+          <button
+            v-for="amt in withdrawAmts"
+            :key="`${row.ccy}-${amt}`"
+            class="earn-btn"
+            type="button"
+            :disabled="!!earnBusy || earnNum(earnBalances?.[row.key]?.earn) < amt"
+            @click="withdrawEarn(row.ccy, amt)"
+          >
+            {{ earnBusy === `withdraw-${row.ccy}-${amt}` ? '…' : amt }}
+          </button>
+        </span>
+      </div>
     </div>
 
     <p v-if="error" class="error">{{ error }}</p>
@@ -775,6 +919,53 @@ p { margin: 0.2rem 0 0; color: var(--muted); }
   gap: 0.75rem;
   align-items: center;
   flex-wrap: wrap;
+}
+.earn-bar {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.earn-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  font-size: 0.86rem;
+}
+.earn-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  color: var(--text);
+  min-width: 0;
+}
+.earn-label strong {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  min-width: 2.6rem;
+}
+.earn-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+.earn-btn {
+  padding: 0.22rem 0.55rem;
+  border-radius: 7px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: var(--panel-2);
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+.earn-btn:hover:not(:disabled) {
+  color: var(--text);
+  background: #222b3a;
 }
 .muted { color: var(--muted); font-size: 0.9rem; }
 .ok-msg { color: var(--ok); font-size: 0.9rem; }
