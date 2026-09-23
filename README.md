@@ -62,7 +62,7 @@ cd admin && npm install && npm run dev
 ## Безопасность
 
 - В `.env` только админ-логин и БД; ключи бирж/Telegram — в Settings (маскируются в API)
-- Для бирж достаточно ключа **Read**
+- Для мониторинга fills достаточно ключа **Read**; Stake/Unstake на OKX двигает Simple Earn — нужен **Trade**
 - Не коммитьте `.env` и реальные секреты
 
 ## Лицензия

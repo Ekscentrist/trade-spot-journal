@@ -1,10 +1,13 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { type Exchange, parseExchange } from '../exchange.js';
+import { OkxEarnFundService } from '../okx/okx-earn-fund.service.js';
+import { DUST_AMT, parseBaseCcy } from '../okx/okx-rest.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { getLastPrices } from './tickers.js';
 import {
@@ -68,7 +71,12 @@ const orderSelect = {
 
 @Injectable()
 export class OrdersService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(OrdersService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly okxEarnFundService: OkxEarnFundService,
+  ) {}
 
   async list(params: {
     exchange: Exchange;
@@ -546,6 +554,12 @@ export class OrdersService {
   async stake(orderId: number) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
+      include: {
+        matchedSells: {
+          where: { dealId: null },
+          select: { allocatedSz: true, accFillSz: true, sz: true },
+        },
+      },
     });
     if (!order) {
       throw new NotFoundException('Order not found');
@@ -568,6 +582,10 @@ export class OrdersService {
       data: { stakedAt: new Date() },
     });
 
+    if (parseExchange(order.exchange) === 'okx') {
+      await this.moveOkxEarnForBuy(order, 'stake');
+    }
+
     return {
       staked: true,
       open: await this.listOpen({ exchange: parseExchange(order.exchange) }),
@@ -575,7 +593,15 @@ export class OrdersService {
   }
 
   async unstake(orderId: number) {
-    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        matchedSells: {
+          where: { dealId: null },
+          select: { allocatedSz: true, accFillSz: true, sz: true },
+        },
+      },
+    });
     if (!order) {
       throw new NotFoundException('Order not found');
     }
@@ -588,12 +614,67 @@ export class OrdersService {
       data: { stakedAt: null },
     });
 
+    if (parseExchange(order.exchange) === 'okx') {
+      await this.moveOkxEarnForBuy(order, 'unstake');
+    }
+
     const exchange = parseExchange(order.exchange);
     return {
       unstaked: true,
       open: await this.listOpen({ exchange }),
       staking: await this.listStaking({ exchange }),
     };
+  }
+
+  /**
+   * After DB stake/unstake: move remaining base size Trading↔Earn on OKX.
+   * Failures notify Telegram only; never roll back stakedAt.
+   */
+  private async moveOkxEarnForBuy(
+    order: {
+      id: number;
+      instId: string;
+      side: string;
+      accFillSz: string | null;
+      sz: string | null;
+      matchedSells: Array<{
+        allocatedSz: string | null;
+        accFillSz: string | null;
+        sz: string | null;
+      }>;
+    },
+    action: 'stake' | 'unstake',
+  ) {
+    const buySz = orderSize(order);
+    const linkedSz = order.matchedSells.reduce(
+      (sum, item) => sum + (parseNum(item.allocatedSz) || orderSize(item)),
+      0,
+    );
+    const remaining = Math.max(buySz - linkedSz, 0);
+    if (remaining <= DUST_AMT) {
+      this.logger.debug(
+        `OKX Earn ${action} skip order #${order.id}: remaining size 0`,
+      );
+      return;
+    }
+
+    const ccy = parseBaseCcy(order.instId);
+    if (!ccy) return;
+
+    const context = `${action} BUY ${order.instId} #${order.id}`;
+    if (action === 'stake') {
+      await this.okxEarnFundService.moveTradingToEarn({
+        ccy,
+        amt: remaining,
+        context,
+      });
+    } else {
+      await this.okxEarnFundService.moveEarnToTrading({
+        ccy,
+        amt: remaining,
+        context,
+      });
+    }
   }
 
   private async maybeCloseBuy(buyOrderId: number) {
