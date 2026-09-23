@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from '../api'
 import { exchange, exchangeQuery } from '../exchange'
+import { prettyNum } from '../num'
 
 type OrderRow = {
   id: number
@@ -118,11 +119,9 @@ function size(o: OrderRow) {
   return prettyNum(o.allocatedSz || o.accFillSz || o.sz)
 }
 
-function prettyNum(value?: string | null) {
-  if (value == null || value === '') return '—'
-  const n = Number(value)
-  if (!Number.isFinite(n)) return value
-  return n.toFixed(16).replace(/\.?0+$/, '') || '0'
+function feeLabel(o: OrderRow) {
+  if (!o.fee) return '—'
+  return `${prettyNum(o.fee)} ${o.feeCcy || ''}`.trim()
 }
 
 function fmt(dt: string | null) {
@@ -355,7 +354,7 @@ onUnmounted(() => {
         <span>Size {{ size(buy) }}</span>
         <span>Px {{ price(buy) }}</span>
         <span v-if="buy.lastPx">Now {{ buy.lastPx }}</span>
-        <span>Fee {{ buy.fee ? `${buy.fee} ${buy.feeCcy || ''}`.trim() : '—' }}</span>
+        <span>Fee {{ feeLabel(buy) }}</span>
       </div>
       <div class="progress">
         <div class="bar"><i :style="{ width: pct(buy.coverage) }" /></div>

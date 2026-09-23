@@ -54,15 +54,31 @@ export function formatNum(value: number, digits = 8): string {
   return fixed.replace(/\.?0+$/, '') || '0';
 }
 
-/** Strip float noise / trailing zeros from exchange numeric strings. */
-export function cleanDecimal(
-  value?: string | null,
-  digits = 16,
-): string | null {
-  if (value == null || value === '') return null;
-  const n = Number(value);
-  if (!Number.isFinite(n)) return value;
-  return formatNum(n, digits);
+function hasFloatNoise(raw: string): boolean {
+  const frac = raw.split('.')[1] || '';
+  return /0{8,}[1-9]/.test(frac) || /9{8,}/.test(frac);
+}
+
+function trimDecimalZeros(raw: string): string {
+  if (!raw.includes('.')) return raw === '-0' ? '0' : raw;
+  const trimmed = raw.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+  return trimmed === '-0' ? '0' : trimmed;
+}
+
+/**
+ * Keep exchange decimals as written.
+ * `Number(x).toFixed(16)` turns 4313.3 into 4313.3000000000001819 — drop that tail.
+ */
+export function cleanDecimal(value?: string | null): string | null {
+  if (value == null) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  if (/^-?\d+(\.\d{1,12})?$/.test(raw) && !hasFloatNoise(raw)) {
+    return trimDecimalZeros(raw);
+  }
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return raw;
+  return formatNum(n, 8);
 }
 
 export type PnlParts = {

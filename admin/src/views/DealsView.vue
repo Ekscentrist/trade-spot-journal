@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from '../api'
 import { exchange, exchangeQuery } from '../exchange'
+import { prettyNum } from '../num'
 
 type Deal = {
   id: number
@@ -92,11 +93,11 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 function sellSize(order: Deal['orders'][number]) {
-  return order.allocatedSz || order.accFillSz || order.sz || '—'
+  return prettyNum(order.allocatedSz || order.accFillSz || order.sz)
 }
 
 function sellPrice(order: Deal['orders'][number]) {
-  return order.avgPx || order.fillPx || order.px || '—'
+  return prettyNum(order.avgPx || order.fillPx || order.px)
 }
 
 function sellTotal(order: Deal['orders'][number], quoteCcy: string | null) {
@@ -384,7 +385,7 @@ onUnmounted(() => {
                 <td><strong>{{ sellSize(sell) }}</strong></td>
                 <td>{{ sellPrice(sell) }}</td>
                 <td>{{ sellTotal(sell, activeDealModal.quoteCcy) }}</td>
-                <td>{{ sell.fee ? `${sell.fee} ${sell.feeCcy || ''}`.trim() : '—' }}</td>
+                <td>{{ sell.fee ? `${prettyNum(sell.fee)} ${sell.feeCcy || ''}`.trim() : '—' }}</td>
                 <td><code class="ord-id" :title="sell.ordId">{{ sell.ordId }}</code></td>
               </tr>
               <tr v-if="!activeDealModal.orders.length">
