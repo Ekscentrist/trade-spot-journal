@@ -68,6 +68,8 @@ type FundingBalanceRow = {
 export type ScheduleAfterFillArgs = {
   side: string;
   ccy: string;
+  /** Quote currency from instId, e.g. USDT from BTC-USDT */
+  quoteCcy?: string;
   ordId: string;
   fillSz?: string | null;
 };
@@ -92,11 +94,12 @@ export class OkxEarnService implements OnModuleDestroy {
   }
 
   /**
-   * After a live fill: wait POST_FILL_DELAY_MS, then run deposit (buy) and
-   * settle as independent jobs so one failure never blocks the other.
+   * After a live fill: wait POST_FILL_DELAY_MS, then run deposit / settle.
+   * Buy: deposit base coin + settle liabilities (parallel).
+   * Sell: settle sold-coin liability first, then deposit USDT/USDC proceeds to Earn.
    */
   scheduleAfterFill(args: ScheduleAfterFillArgs): void {
-    const { side, ccy, ordId } = args;
+    const { side, ccy, quoteCcy, ordId } = args;
     if (!ordId || !ccy) return;
 
     if (this.pendingByOrdId.has(ordId)) {
@@ -107,15 +110,28 @@ export class OkxEarnService implements OnModuleDestroy {
     const timer = setTimeout(() => {
       this.pendingByOrdId.delete(ordId);
       this.logger.log(`OKX post-fill running: ${side} ${ccy} ord=${ordId}`);
+
       if (side === 'buy') {
         void this.runDepositJob(ccy);
+        void this.enqueueSettleJob(undefined);
+        return;
       }
-      void this.enqueueSettleJob(side === 'sell' ? ccy : undefined);
+
+      if (side === 'sell') {
+        // Repay base-coin debt from Earn first; then park quote proceeds (any ccy) in Earn.
+        void this.enqueueSettleJob(ccy).finally(() => {
+          if (quoteCcy && quoteCcy.toUpperCase() !== ccy.toUpperCase()) {
+            void this.runDepositJob(quoteCcy);
+          }
+        });
+      }
     }, POST_FILL_DELAY_MS);
 
     this.pendingByOrdId.set(ordId, [timer]);
     this.logger.log(
-      `OKX post-fill scheduled in ${POST_FILL_DELAY_MS}ms: ${side} ${ccy} ord=${ordId}`,
+      `OKX post-fill scheduled in ${POST_FILL_DELAY_MS}ms: ${side} ${ccy}` +
+        (quoteCcy ? `/${quoteCcy}` : '') +
+        ` ord=${ordId}`,
     );
   }
 

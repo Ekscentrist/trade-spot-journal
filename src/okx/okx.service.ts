@@ -14,6 +14,7 @@ import {
   OKX_REST_URL,
   okxRestRequest,
   parseBaseCcy,
+  parseQuoteCcy,
 } from './okx-rest.js';
 
 type ConnectionStatus = {
@@ -274,6 +275,7 @@ export class OkxService implements OnModuleInit, OnModuleDestroy {
     this.okxEarnService.scheduleAfterFill({
       side: order.side,
       ccy: parseBaseCcy(order.instId),
+      quoteCcy: parseQuoteCcy(order.instId),
       ordId: order.ordId,
       fillSz: order.accFillSz ?? order.sz,
     });

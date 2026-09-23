@@ -90,6 +90,11 @@ export function parseBaseCcy(instId: string): string {
   return base || instId;
 }
 
+export function parseQuoteCcy(instId: string): string {
+  const quote = instId.split('-')[1]?.trim();
+  return quote || '';
+}
+
 export function parseAmt(value: string | null | undefined): number {
   if (value == null || value === '') return 0;
   const n = Number(value);
