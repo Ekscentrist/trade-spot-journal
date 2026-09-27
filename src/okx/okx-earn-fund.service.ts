@@ -30,6 +30,7 @@ export type WithdrawAmt = (typeof WITHDRAW_AMTS)[number];
 type BalanceDetail = {
   ccy?: string;
   availBal?: string;
+  cashBal?: string;
 };
 
 type BalanceRow = {
@@ -67,6 +68,47 @@ export type StableBalances = {
   usdc: { spot: string; earn: string };
 };
 
+export type AssetHolding = {
+  ccy: string;
+  trading: string;
+  earn: string;
+};
+
+export type AssetHoldings = {
+  assets: AssetHolding[];
+};
+
+const STABLE_FIRST = ['USDT', 'USDC'];
+
+function mergeHoldings(
+  trading: Map<string, number>,
+  earn: Map<string, number>,
+): AssetHolding[] {
+  const ccys = new Set([...trading.keys(), ...earn.keys()]);
+  const assets: AssetHolding[] = [];
+  for (const ccy of ccys) {
+    const tradingAmt = trading.get(ccy) || 0;
+    const earnAmt = earn.get(ccy) || 0;
+    if (tradingAmt <= DUST_AMT && earnAmt <= DUST_AMT) continue;
+    assets.push({
+      ccy,
+      trading: formatAmt(tradingAmt),
+      earn: formatAmt(earnAmt),
+    });
+  }
+  assets.sort((a, b) => {
+    const ia = STABLE_FIRST.indexOf(a.ccy);
+    const ib = STABLE_FIRST.indexOf(b.ccy);
+    if (ia !== -1 || ib !== -1) {
+      if (ia === -1) return 1;
+      if (ib === -1) return -1;
+      return ia - ib;
+    }
+    return a.ccy.localeCompare(b.ccy);
+  });
+  return assets;
+}
+
 @Injectable()
 export class OkxEarnFundService {
   private readonly logger = new Logger(OkxEarnFundService.name);
@@ -88,6 +130,15 @@ export class OkxEarnFundService {
       usdt: { spot: formatAmt(usdtSpot), earn: formatAmt(usdtEarn) },
       usdc: { spot: formatAmt(usdcSpot), earn: formatAmt(usdcEarn) },
     };
+  }
+
+  async getHoldings(): Promise<AssetHoldings> {
+    const creds = await this.requireCredentials();
+    const [trading, earn] = await Promise.all([
+      this.listTradingBalances(creds),
+      this.listEarnBalances(creds),
+    ]);
+    return { assets: mergeHoldings(trading, earn) };
   }
 
   /** Deposit all free Spot of ccy into Simple Earn. Throws on failure. */
@@ -292,6 +343,49 @@ export class OkxEarnFundService {
       secret: settings.okxSecret,
       passphrase: settings.okxPassphrase,
     };
+  }
+
+  private async listTradingBalances(
+    creds: OkxCredentials,
+  ): Promise<Map<string, number>> {
+    const rows = await okxRestRequest<BalanceRow[]>(
+      creds,
+      'GET',
+      '/api/v5/account/balance',
+    );
+    const map = new Map<string, number>();
+    for (const detail of rows[0]?.details || []) {
+      if (!detail.ccy) continue;
+      const cash = parseAmt(detail.cashBal);
+      const amt = cash > DUST_AMT ? cash : parseAmt(detail.availBal);
+      if (amt > DUST_AMT) map.set(detail.ccy, amt);
+    }
+    return map;
+  }
+
+  private async listEarnBalances(
+    creds: OkxCredentials,
+  ): Promise<Map<string, number>> {
+    try {
+      const rows = await okxRestRequest<SavingsBalanceRow[]>(
+        creds,
+        'GET',
+        '/api/v5/finance/savings/balance',
+      );
+      const map = new Map<string, number>();
+      for (const row of rows || []) {
+        if (!row.ccy) continue;
+        const amt = parseAmt(row.amt);
+        if (amt <= DUST_AMT) continue;
+        map.set(row.ccy, (map.get(row.ccy) || 0) + amt);
+      }
+      return map;
+    } catch (error) {
+      this.logger.warn(
+        `OKX Earn balances failed: ${(error as Error).message}`,
+      );
+      return new Map();
+    }
   }
 
   private async getTradingAvail(

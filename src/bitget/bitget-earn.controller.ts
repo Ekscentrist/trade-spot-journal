@@ -13,6 +13,11 @@ export class BitgetEarnController {
     return this.bitgetEarnFundService.getStableBalances();
   }
 
+  @Get('holdings')
+  holdings() {
+    return this.bitgetEarnFundService.getHoldings();
+  }
+
   @Post('deposit')
   deposit(@Body() dto: EarnDepositDto) {
     return this.bitgetEarnFundService.depositAllSpot(dto.ccy);

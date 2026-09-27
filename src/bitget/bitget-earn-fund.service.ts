@@ -66,6 +66,47 @@ export type StableBalances = {
   usdc: { spot: string; earn: string };
 };
 
+export type AssetHolding = {
+  ccy: string;
+  trading: string;
+  earn: string;
+};
+
+export type AssetHoldings = {
+  assets: AssetHolding[];
+};
+
+const STABLE_FIRST = ['USDT', 'USDC'];
+
+function mergeHoldings(
+  trading: Map<string, number>,
+  earn: Map<string, number>,
+): AssetHolding[] {
+  const ccys = new Set([...trading.keys(), ...earn.keys()]);
+  const assets: AssetHolding[] = [];
+  for (const ccy of ccys) {
+    const tradingAmt = trading.get(ccy) || 0;
+    const earnAmt = earn.get(ccy) || 0;
+    if (tradingAmt <= DUST_AMT && earnAmt <= DUST_AMT) continue;
+    assets.push({
+      ccy,
+      trading: formatAmt(tradingAmt),
+      earn: formatAmt(earnAmt),
+    });
+  }
+  assets.sort((a, b) => {
+    const ia = STABLE_FIRST.indexOf(a.ccy);
+    const ib = STABLE_FIRST.indexOf(b.ccy);
+    if (ia !== -1 || ib !== -1) {
+      if (ia === -1) return 1;
+      if (ib === -1) return -1;
+      return ia - ib;
+    }
+    return a.ccy.localeCompare(b.ccy);
+  });
+  return assets;
+}
+
 @Injectable()
 export class BitgetEarnFundService {
   private readonly logger = new Logger(BitgetEarnFundService.name);
@@ -87,6 +128,15 @@ export class BitgetEarnFundService {
       usdt: { spot: formatAmt(usdtSpot), earn: formatAmt(usdtEarn) },
       usdc: { spot: formatAmt(usdcSpot), earn: formatAmt(usdcEarn) },
     };
+  }
+
+  async getHoldings(): Promise<AssetHoldings> {
+    const creds = await this.requireCredentials();
+    const [trading, earn] = await Promise.all([
+      this.listTradingBalances(creds),
+      this.listEarnBalances(creds),
+    ]);
+    return { assets: mergeHoldings(trading, earn) };
   }
 
   /** Deposit all free Spot of ccy into Flexible Savings. Throws on failure. */
@@ -283,6 +333,45 @@ export class BitgetEarnFundService {
     };
   }
 
+  private async listTradingBalances(
+    creds: BitgetCredentials,
+  ): Promise<Map<string, number>> {
+    const rows = await bitgetRestRequest<SpotAssetRow[]>(
+      creds,
+      'GET',
+      '/api/v2/spot/account/assets',
+    );
+    const map = new Map<string, number>();
+    for (const row of Array.isArray(rows) ? rows : []) {
+      if (!row.coin) continue;
+      const amt =
+        parseAmt(row.available) + parseAmt(row.frozen) + parseAmt(row.locked);
+      if (amt > DUST_AMT) map.set(row.coin, amt);
+    }
+    return map;
+  }
+
+  private async listEarnBalances(
+    creds: BitgetCredentials,
+  ): Promise<Map<string, number>> {
+    try {
+      const holdings = await this.listEarnHoldings(creds);
+      const map = new Map<string, number>();
+      for (const row of holdings) {
+        if (!row.productCoin) continue;
+        const amt = parseAmt(row.holdAmount);
+        if (amt <= DUST_AMT) continue;
+        map.set(row.productCoin, (map.get(row.productCoin) || 0) + amt);
+      }
+      return map;
+    } catch (error) {
+      this.logger.warn(
+        `Bitget Earn balances failed: ${(error as Error).message}`,
+      );
+      return new Map();
+    }
+  }
+
   private async getSpotAvail(
     creds: BitgetCredentials,
     ccy: string,
@@ -350,7 +439,7 @@ export class BitgetEarnFundService {
 
   private async listEarnHoldings(
     creds: BitgetCredentials,
-    ccy: string,
+    ccy?: string,
   ): Promise<SavingsAssetRow[]> {
     const matched: SavingsAssetRow[] = [];
     let idLessThan: string | undefined;
@@ -370,7 +459,7 @@ export class BitgetEarnFundService {
       const rows = data?.resultList || [];
       for (const row of rows) {
         if (
-          row.productCoin === ccy &&
+          (!ccy || row.productCoin === ccy) &&
           (row.periodType === PERIOD_FLEXIBLE || !row.periodType) &&
           parseAmt(row.holdAmount) > DUST_AMT
         ) {

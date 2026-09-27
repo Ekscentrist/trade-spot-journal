@@ -13,6 +13,11 @@ export class OkxEarnController {
     return this.okxEarnFundService.getStableBalances();
   }
 
+  @Get('holdings')
+  holdings() {
+    return this.okxEarnFundService.getHoldings();
+  }
+
   @Post('deposit')
   deposit(@Body() dto: EarnDepositDto) {
     return this.okxEarnFundService.depositAllSpot(dto.ccy);
