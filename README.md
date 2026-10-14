@@ -1,18 +1,18 @@
-# Trade — Spot monitor & journal (OKX + Bitget)
+# Trade — Spot monitor & journal (OKX + Bitget + Gate)
 
-Личный сервис для учёта Spot-сделок на OKX и Bitget: исполнения приходят по WebSocket, пишутся в MySQL, уведомления уходят в Telegram. В админке на Vue можно переключать биржу, связать sell с buy и считать PnL.
+Личный сервис для учёта Spot-сделок на OKX, Bitget и Gate: исполнения приходят по WebSocket, пишутся в MySQL, уведомления уходят в Telegram. В админке на Vue можно переключать биржу, связать sell с buy и считать PnL.
 
 ## Стек
 
 - **Backend:** NestJS (TypeScript), Prisma, MySQL
-- **Realtime:** OKX / Bitget private WebSocket (`orders` / SPOT)
+- **Realtime:** OKX / Bitget / Gate private WebSocket (`orders` / SPOT)
 - **Market data:** exchange public tickers (mark-to-market PnL)
 - **Frontend:** Vue 3 + Vite (тёмная админка)
 - **Infra:** nginx + systemd
 
 ## Что умеет
 
-- Мониторинг Spot fills по read-only API key (OKX и Bitget)
+- Мониторинг Spot fills по read-only API key (OKX, Bitget и Gate)
 - Переключение биржи в шапке админки
 - Telegram-уведомления о исполнениях
 - Ручная привязка sell → buy (drag-and-drop), частичные продажи
@@ -26,7 +26,7 @@
 ## Структура
 
 ```
-src/           Nest API (auth, settings, orders, deals, okx, bitget, telegram)
+src/           Nest API (auth, settings, orders, deals, okx, bitget, gate, telegram)
 admin/         Vue SPA
 prisma/        схема БД (Order, Deal, Setting)
 ```
@@ -53,16 +53,16 @@ cd admin && npm install && npm run dev
 | Метод | Путь | Назначение |
 |-------|------|------------|
 | POST | `/api/auth/login` | JWT |
-| GET/PUT | `/api/settings` | OKX + Bitget + Telegram |
-| GET | `/api/status` | статус WS обеих бирж |
-| GET | `/api/orders/open?exchange=okx\|bitget` | открытые buy/sell + MTM |
+| GET/PUT | `/api/settings` | OKX + Bitget + Gate + Telegram |
+| GET | `/api/status` | статус WS всех бирж |
+| GET | `/api/orders/open?exchange=okx\|bitget\|gate` | открытые buy/sell + MTM |
 | POST | `/api/orders/link` | связать sell с buy |
-| GET | `/api/deals?exchange=okx\|bitget` | закрытые сделки + PnL |
+| GET | `/api/deals?exchange=okx\|bitget\|gate` | закрытые сделки + PnL |
 
 ## Безопасность
 
 - В `.env` только админ-логин и БД; ключи бирж/Telegram — в Settings (маскируются в API)
-- Для мониторинга fills достаточно ключа **Read**; Stake/Unstake на OKX двигает Simple Earn — нужен **Trade**
+- Для мониторинга fills достаточно ключа **Read**; Stake/Unstake двигает Earn (OKX Simple Earn / Bitget Flexible Savings / Gate Uni Earn) — нужен **Trade**
 - Не коммитьте `.env` и реальные секреты
 
 ## Лицензия

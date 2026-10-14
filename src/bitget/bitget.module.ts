@@ -7,7 +7,7 @@ import { BitgetService } from './bitget.service.js';
 @Module({
   imports: [
     forwardRef(() => SettingsModule),
-    OrdersModule,
+    forwardRef(() => OrdersModule),
     forwardRef(() => TelegramModule),
   ],
   providers: [BitgetService],

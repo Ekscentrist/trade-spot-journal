@@ -15,6 +15,8 @@ const SETTING_KEYS = [
   'bitgetApiKey',
   'bitgetSecret',
   'bitgetPassphrase',
+  'gateApiKey',
+  'gateSecret',
   'telegramBotToken',
   'telegramChatId',
 ] as const;
@@ -38,12 +40,15 @@ export class SettingsService {
       bitgetApiKey: mask(row.bitgetApiKey),
       bitgetSecret: mask(row.bitgetSecret),
       bitgetPassphrase: mask(row.bitgetPassphrase),
+      gateApiKey: mask(row.gateApiKey),
+      gateSecret: mask(row.gateSecret),
       telegramBotToken: mask(row.telegramBotToken),
       telegramChatId: row.telegramChatId,
       hasOkx: Boolean(row.okxApiKey && row.okxSecret && row.okxPassphrase),
       hasBitget: Boolean(
         row.bitgetApiKey && row.bitgetSecret && row.bitgetPassphrase,
       ),
+      hasGate: Boolean(row.gateApiKey && row.gateSecret),
       hasTelegram: Boolean(row.telegramBotToken && row.telegramChatId),
       updatedAt: row.updatedAt,
     };

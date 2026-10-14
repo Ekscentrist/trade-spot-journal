@@ -1,12 +1,24 @@
 import { ref } from 'vue'
 
-export type Exchange = 'okx' | 'bitget'
+export const EXCHANGES = ['okx', 'bitget', 'gate'] as const
+export type Exchange = (typeof EXCHANGES)[number]
 
 const KEY = 'trade_exchange'
 
+const LABELS: Record<Exchange, string> = {
+  okx: 'OKX',
+  bitget: 'Bitget',
+  gate: 'Gate',
+}
+
+function isExchange(value: string): value is Exchange {
+  return (EXCHANGES as readonly string[]).includes(value)
+}
+
 function read(): Exchange {
   try {
-    return localStorage.getItem(KEY) === 'bitget' ? 'bitget' : 'okx'
+    const raw = localStorage.getItem(KEY)
+    return raw && isExchange(raw) ? raw : 'okx'
   } catch {
     return 'okx'
   }
@@ -14,13 +26,17 @@ function read(): Exchange {
 
 export const exchange = ref<Exchange>(read())
 
-export function setExchange(value: Exchange) {
-  exchange.value = value === 'bitget' ? 'bitget' : 'okx'
+export function setExchange(value: Exchange | string) {
+  exchange.value = isExchange(value) ? value : 'okx'
   localStorage.setItem(KEY, exchange.value)
 }
 
 export function exchangeLabel(value: Exchange = exchange.value) {
-  return value === 'bitget' ? 'Bitget' : 'OKX'
+  return LABELS[value]
+}
+
+export function earnApiBase(value: Exchange = exchange.value) {
+  return `/${value}/earn`
 }
 
 export function exchangeQuery(extra?: Record<string, string>) {

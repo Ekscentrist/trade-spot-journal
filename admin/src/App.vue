@@ -2,7 +2,13 @@
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { api, clearToken, getToken } from './api'
-import { exchange, exchangeLabel, setExchange, type Exchange } from './exchange'
+import {
+  earnApiBase,
+  exchange,
+  exchangeLabel,
+  setExchange,
+  type Exchange,
+} from './exchange'
 
 type AssetHolding = { ccy: string; trading: string; earn: string }
 
@@ -12,7 +18,7 @@ const authed = computed(() => Boolean(getToken()) && route.name !== 'login')
 
 const selectedExchange = computed({
   get: () => exchange.value,
-  set: (value: string) => setExchange(value === 'bitget' ? 'bitget' : 'okx'),
+  set: (value: string) => setExchange(value),
 })
 
 const balancesOpen = ref(false)
@@ -40,7 +46,7 @@ function fmtAmt(value?: string | null) {
 async function loadHoldings() {
   balancesLoading.value = true
   balancesError.value = ''
-  const base = exchange.value === 'bitget' ? '/bitget/earn' : '/okx/earn'
+  const base = earnApiBase()
   try {
     const data = await api<{ assets: AssetHolding[] }>(`${base}/holdings`)
     assets.value = data.assets || []
@@ -95,6 +101,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         >
           <option value="okx">OKX</option>
           <option value="bitget">Bitget</option>
+          <option value="gate">Gate</option>
         </select>
         <button class="secondary" type="button" @click="openBalances">Balances</button>
         <button class="secondary" type="button" @click="logout">Logout</button>

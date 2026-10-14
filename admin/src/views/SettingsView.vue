@@ -10,10 +10,13 @@ type Settings = {
   bitgetApiKey: string | null
   bitgetSecret: string | null
   bitgetPassphrase: string | null
+  gateApiKey: string | null
+  gateSecret: string | null
   telegramBotToken: string | null
   telegramChatId: string | null
   hasOkx: boolean
   hasBitget: boolean
+  hasGate: boolean
   hasTelegram: boolean
   updatedAt: string
 }
@@ -29,6 +32,7 @@ type ConnStatus = {
 type Status = {
   okx: ConnStatus
   bitget: ConnStatus
+  gate: ConnStatus
 }
 
 const form = reactive({
@@ -38,6 +42,8 @@ const form = reactive({
   bitgetApiKey: '',
   bitgetSecret: '',
   bitgetPassphrase: '',
+  gateApiKey: '',
+  gateSecret: '',
   telegramBotToken: '',
   telegramChatId: '',
 })
@@ -86,6 +92,8 @@ async function save() {
     form.bitgetApiKey = ''
     form.bitgetSecret = ''
     form.bitgetPassphrase = ''
+    form.gateApiKey = ''
+    form.gateSecret = ''
     form.telegramBotToken = ''
     status.value = await api<Status>('/status')
     const reconnecting: string[] = []
@@ -93,6 +101,7 @@ async function save() {
     if (body.bitgetApiKey || body.bitgetSecret || body.bitgetPassphrase) {
       reconnecting.push('Bitget')
     }
+    if (body.gateApiKey || body.gateSecret) reconnecting.push('Gate')
     message.value = reconnecting.length
       ? `Saved. ${reconnecting.join(' + ')} reconnect triggered.`
       : 'Saved.'
@@ -135,6 +144,9 @@ onMounted(load)
         <button class="secondary" type="button" @click="reconnect('bitget')" :disabled="loading">
           Reconnect Bitget
         </button>
+        <button class="secondary" type="button" @click="reconnect('gate')" :disabled="loading">
+          Reconnect Gate
+        </button>
       </div>
     </div>
 
@@ -151,11 +163,18 @@ onMounted(load)
       <span v-if="settings" class="badge" :class="settings.hasBitget ? 'ok' : 'warn'">
         Bitget keys {{ settings.hasBitget ? 'set' : 'missing' }}
       </span>
+      <span class="badge" :class="online(status.gate) ? 'ok' : 'err'">
+        Gate {{ online(status.gate) ? 'online' : 'offline' }}
+      </span>
+      <span v-if="settings" class="badge" :class="settings.hasGate ? 'ok' : 'warn'">
+        Gate keys {{ settings.hasGate ? 'set' : 'missing' }}
+      </span>
       <span v-if="settings" class="badge" :class="settings.hasTelegram ? 'ok' : 'warn'">
         telegram {{ settings.hasTelegram ? 'set' : 'missing' }}
       </span>
       <span v-if="status.okx.lastError" class="error">OKX: {{ status.okx.lastError }}</span>
       <span v-if="status.bitget.lastError" class="error">Bitget: {{ status.bitget.lastError }}</span>
+      <span v-if="status.gate.lastError" class="error">Gate: {{ status.gate.lastError }}</span>
     </div>
 
     <form class="grid" @submit.prevent="save">
@@ -185,6 +204,16 @@ onMounted(load)
       <label>
         Passphrase
         <input v-model="form.bitgetPassphrase" type="password" :placeholder="settings?.bitgetPassphrase || 'Passphrase'" />
+      </label>
+
+      <h2>Gate</h2>
+      <label>
+        API Key
+        <input v-model="form.gateApiKey" :placeholder="settings?.gateApiKey || 'API key'" />
+      </label>
+      <label>
+        Secret
+        <input v-model="form.gateSecret" type="password" :placeholder="settings?.gateSecret || 'Secret'" />
       </label>
 
       <h2>Telegram</h2>

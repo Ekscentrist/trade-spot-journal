@@ -1,14 +1,25 @@
-export const EXCHANGES = ['okx', 'bitget'] as const;
+export const EXCHANGES = ['okx', 'bitget', 'gate'] as const;
 export type Exchange = (typeof EXCHANGES)[number];
 export const DEFAULT_EXCHANGE: Exchange = 'okx';
 
+const LABELS: Record<Exchange, string> = {
+  okx: 'OKX',
+  bitget: 'Bitget',
+  gate: 'Gate',
+};
+
+function isExchange(value: string): value is Exchange {
+  return (EXCHANGES as readonly string[]).includes(value);
+}
+
 export function parseExchange(value?: string | string[] | null): Exchange {
   const raw = Array.isArray(value) ? value[0] : value;
-  return raw === 'bitget' ? 'bitget' : DEFAULT_EXCHANGE;
+  if (raw && isExchange(raw)) return raw;
+  return DEFAULT_EXCHANGE;
 }
 
 export function exchangeLabel(exchange: Exchange): string {
-  return exchange === 'bitget' ? 'Bitget' : 'OKX';
+  return LABELS[exchange];
 }
 
 export function parseInstIds(instIds?: string | string[]): string[] {

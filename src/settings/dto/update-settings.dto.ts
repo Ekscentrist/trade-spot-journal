@@ -27,6 +27,14 @@ export class UpdateSettingsDto {
 
   @IsOptional()
   @IsString()
+  gateApiKey?: string;
+
+  @IsOptional()
+  @IsString()
+  gateSecret?: string;
+
+  @IsOptional()
+  @IsString()
   telegramBotToken?: string;
 
   @IsOptional()

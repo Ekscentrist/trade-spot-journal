@@ -11,6 +11,7 @@ import {
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { BitgetService } from '../bitget/bitget.service.js';
 import { parseExchange } from '../exchange.js';
+import { GateService } from '../gate/gate.service.js';
 import { OkxService } from '../okx/okx.service.js';
 import { UpdateSettingsDto } from './dto/update-settings.dto.js';
 import { SettingsService } from './settings.service.js';
@@ -24,6 +25,8 @@ export class SettingsController {
     private readonly okxService: OkxService,
     @Inject(forwardRef(() => BitgetService))
     private readonly bitgetService: BitgetService,
+    @Inject(forwardRef(() => GateService))
+    private readonly gateService: GateService,
   ) {}
 
   @Get()
@@ -40,8 +43,10 @@ export class SettingsController {
     const bitgetChanged = Boolean(
       dto.bitgetApiKey || dto.bitgetSecret || dto.bitgetPassphrase,
     );
+    const gateChanged = Boolean(dto.gateApiKey || dto.gateSecret);
     if (okxChanged) await this.okxService.reconnect();
     if (bitgetChanged) await this.bitgetService.reconnect();
+    if (gateChanged) await this.gateService.reconnect();
     return settings;
   }
 
@@ -52,15 +57,21 @@ export class SettingsController {
       await Promise.all([
         this.okxService.reconnect(),
         this.bitgetService.reconnect(),
+        this.gateService.reconnect(),
       ]);
       return {
         okx: this.okxService.getStatus(),
         bitget: this.bitgetService.getStatus(),
+        gate: this.gateService.getStatus(),
       };
     }
     if (ex === 'bitget') {
       await this.bitgetService.reconnect();
       return this.bitgetService.getStatus();
+    }
+    if (ex === 'gate') {
+      await this.gateService.reconnect();
+      return this.gateService.getStatus();
     }
     await this.okxService.reconnect();
     return this.okxService.getStatus();

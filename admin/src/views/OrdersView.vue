@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from '../api'
-import { exchange, exchangeLabel, exchangeQuery } from '../exchange'
+import { earnApiBase as earnPath, exchange, exchangeLabel, exchangeQuery } from '../exchange'
 import { prettyNum } from '../num'
 
 type OrderRow = {
@@ -70,6 +70,7 @@ type ConnStatus = {
 type Status = {
   okx: ConnStatus
   bitget: ConnStatus
+  gate: ConnStatus
 }
 
 const MTM_POLL_MS = 5_000
@@ -130,9 +131,7 @@ let earnInFlight = false
 
 const earnBalances = ref<StableBalances | null>(null)
 const earnBusy = ref('')
-const earnApiBase = computed(() =>
-  exchange.value === 'bitget' ? '/bitget/earn' : '/okx/earn',
-)
+const earnApiBase = computed(() => earnPath())
 const withdrawAmts = WITHDRAW_AMTS
 const stableRows = STABLE_ROWS
 

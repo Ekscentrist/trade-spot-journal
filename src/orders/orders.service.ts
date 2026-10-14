@@ -7,6 +7,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { BitgetEarnFundService } from '../bitget/bitget-earn-fund.service.js';
 import { type Exchange, parseExchange } from '../exchange.js';
+import { GateEarnFundService } from '../gate/gate-earn-fund.service.js';
 import { OkxEarnFundService } from '../okx/okx-earn-fund.service.js';
 import { DUST_AMT, parseBaseCcy } from '../okx/okx-rest.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -78,6 +79,7 @@ export class OrdersService {
     private readonly prisma: PrismaService,
     private readonly okxEarnFundService: OkxEarnFundService,
     private readonly bitgetEarnFundService: BitgetEarnFundService,
+    private readonly gateEarnFundService: GateEarnFundService,
   ) {}
 
   async list(params: {
@@ -671,6 +673,23 @@ export class OrdersService {
         });
       } else {
         await this.bitgetEarnFundService.moveEarnToSpot({
+          ccy,
+          amt: remaining,
+          context,
+        });
+      }
+      return;
+    }
+
+    if (exchange === 'gate') {
+      if (action === 'stake') {
+        await this.gateEarnFundService.moveSpotToEarn({
+          ccy,
+          amt: remaining,
+          context,
+        });
+      } else {
+        await this.gateEarnFundService.moveEarnToSpot({
           ccy,
           amt: remaining,
           context,
