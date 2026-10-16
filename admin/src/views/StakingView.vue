@@ -88,6 +88,8 @@ const error = ref('')
 const message = ref('')
 const loading = ref(false)
 const dropdownRoot = ref<HTMLElement | null>(null)
+const transferBuyId = ref<number | null>(null)
+const transferTarget = ref<Exchange | null>(null)
 let mtmTimer: ReturnType<typeof setInterval> | null = null
 let mtmInFlight = false
 
@@ -279,7 +281,26 @@ function otherExchanges(): Exchange[] {
   return EXCHANGES.filter((ex) => ex !== exchange.value)
 }
 
-async function changeExchange(orderId: number, next: Exchange) {
+const transferBuy = computed(() =>
+  transferBuyId.value == null
+    ? null
+    : buys.value.find((buy) => buy.id === transferBuyId.value) ?? null,
+)
+
+function openTransfer(buyId: number) {
+  transferBuyId.value = buyId
+  transferTarget.value = null
+}
+
+function closeTransfer() {
+  transferBuyId.value = null
+  transferTarget.value = null
+}
+
+async function confirmTransfer() {
+  const orderId = transferBuyId.value
+  const next = transferTarget.value
+  if (orderId == null || !next) return
   loading.value = true
   error.value = ''
   message.value = ''
@@ -293,6 +314,7 @@ async function changeExchange(orderId: number, next: Exchange) {
       ? nextStaking.filter((buy) => selectedInstIds.value.includes(buy.instId))
       : nextStaking
     message.value = `Buy moved to ${exchangeLabel(next)} (unstaked)`
+    closeTransfer()
   } catch (e) {
     error.value = (e as Error).message
   } finally {
@@ -381,14 +403,12 @@ onUnmounted(() => {
         <span class="muted">{{ fmt(buy.stakedAt) }}</span>
         <button class="linkish" type="button" @click="unstake(buy.id)">Unstake</button>
         <button
-          v-for="ex in otherExchanges()"
-          :key="ex"
-          class="linkish"
+          class="linkish warnish"
           type="button"
           :disabled="loading"
-          @click="changeExchange(buy.id, ex)"
+          @click="openTransfer(buy.id)"
         >
-          → {{ exchangeLabel(ex) }}
+          Transfer
         </button>
       </div>
       <div class="meta">
@@ -417,6 +437,47 @@ onUnmounted(() => {
         </div>
       </div>
     </article>
+
+    <div
+      v-if="transferBuyId != null"
+      class="modal-backdrop"
+      @click.self="closeTransfer"
+    >
+      <div class="modal-card transfer-modal">
+        <div class="modal-header">
+          <div class="modal-title">
+            <h3>Transfer buy</h3>
+            <span v-if="transferBuy" class="badge warn">{{ transferBuy.instId }}</span>
+          </div>
+          <button type="button" class="close-btn" title="Close" @click="closeTransfer">✕</button>
+        </div>
+        <p class="transfer-hint">
+          Move this buy (and linked sells) to another exchange. It will be unstaked first.
+        </p>
+        <div class="transfer-choices">
+          <button
+            v-for="ex in otherExchanges()"
+            :key="ex"
+            type="button"
+            class="secondary transfer-choice"
+            :class="{ selected: transferTarget === ex }"
+            @click="transferTarget = ex"
+          >
+            {{ exchangeLabel(ex) }}
+          </button>
+        </div>
+        <div class="modal-actions">
+          <button class="secondary" type="button" @click="closeTransfer">Cancel</button>
+          <button
+            type="button"
+            :disabled="!transferTarget || loading"
+            @click="confirmTransfer"
+          >
+            {{ loading ? '…' : 'Transfer' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -533,6 +594,83 @@ p { margin: 0.2rem 0 0; color: var(--muted); }
 }
 .card-top .linkish { margin-left: 0; }
 .card-top .linkish:first-of-type { margin-left: auto; }
+.warnish {
+  color: var(--warn) !important;
+}
+.warnish:hover {
+  color: #fcd34d !important;
+}
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1.25rem;
+}
+.modal-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.55);
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.25rem 1.35rem;
+}
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.modal-title {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.modal-title h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+.close-btn {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  font-size: 1.2rem;
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+  border-radius: 6px;
+  line-height: 1;
+}
+.close-btn:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+.transfer-hint {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.transfer-choices {
+  display: grid;
+  gap: 0.5rem;
+}
+.transfer-choice.selected {
+  border-color: var(--warn);
+  box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.25);
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
 .meta {
   display: flex;
   flex-wrap: wrap;
