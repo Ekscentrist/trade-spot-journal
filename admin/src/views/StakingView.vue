@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from '../api'
-import { exchange, exchangeQuery } from '../exchange'
+import {
+  EXCHANGES,
+  type Exchange,
+  exchange,
+  exchangeLabel,
+  exchangeQuery,
+} from '../exchange'
 import { prettyNum } from '../num'
 
 type OrderRow = {
@@ -269,6 +275,31 @@ async function unstake(orderId: number) {
   }
 }
 
+function otherExchanges(): Exchange[] {
+  return EXCHANGES.filter((ex) => ex !== exchange.value)
+}
+
+async function changeExchange(orderId: number, next: Exchange) {
+  loading.value = true
+  error.value = ''
+  message.value = ''
+  try {
+    const res = await api<{ staking?: StakedBuy[] }>(`/orders/${orderId}/exchange`, {
+      method: 'POST',
+      body: JSON.stringify({ exchange: next }),
+    })
+    const nextStaking = res.staking || []
+    buys.value = selectedInstIds.value.length
+      ? nextStaking.filter((buy) => selectedInstIds.value.includes(buy.instId))
+      : nextStaking
+    message.value = `Buy moved to ${exchangeLabel(next)} (unstaked)`
+  } catch (e) {
+    error.value = (e as Error).message
+  } finally {
+    loading.value = false
+  }
+}
+
 watch(
   selectedInstIds,
   (value) => {
@@ -349,6 +380,18 @@ onUnmounted(() => {
         <strong class="coin-link" @click.stop="selectInstrument(buy.instId)">{{ buy.instId }}</strong>
         <span class="muted">{{ fmt(buy.stakedAt) }}</span>
         <button class="linkish" type="button" @click="unstake(buy.id)">Unstake</button>
+        <template v-if="!buy.matchedSells.length">
+          <button
+            v-for="ex in otherExchanges()"
+            :key="ex"
+            class="linkish"
+            type="button"
+            :disabled="loading"
+            @click="changeExchange(buy.id, ex)"
+          >
+            → {{ exchangeLabel(ex) }}
+          </button>
+        </template>
       </div>
       <div class="meta">
         <span>Size {{ size(buy) }}</span>
@@ -488,8 +531,10 @@ p { margin: 0.2rem 0 0; color: var(--muted); }
   gap: 0.55rem;
   align-items: center;
   margin-bottom: 0.45rem;
+  flex-wrap: wrap;
 }
-.card-top .linkish { margin-left: auto; }
+.card-top .linkish { margin-left: 0; }
+.card-top .linkish:first-of-type { margin-left: auto; }
 .meta {
   display: flex;
   flex-wrap: wrap;

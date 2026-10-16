@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { parseExchange, parseInstIds } from '../exchange.js';
+import { ChangeExchangeDto } from './dto/change-exchange.dto.js';
 import { LinkOrdersDto } from './dto/link-orders.dto.js';
 import { OrdersService } from './orders.service.js';
 
@@ -98,6 +99,14 @@ export class OrdersController {
   @Post(':id/unstake')
   unstake(@Param('id', ParseIntPipe) id: number) {
     return this.ordersService.unstake(id);
+  }
+
+  @Post(':id/exchange')
+  changeExchange(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ChangeExchangeDto,
+  ) {
+    return this.ordersService.changeExchange(id, dto.exchange);
   }
 
   @Get()

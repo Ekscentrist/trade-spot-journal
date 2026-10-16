@@ -626,6 +626,73 @@ export class OrdersService {
     };
   }
 
+  async changeExchange(orderId: number, next: Exchange) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        matchedSells: {
+          where: { dealId: null },
+          select: { id: true, allocatedSz: true, accFillSz: true, sz: true },
+        },
+      },
+    });
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+    if (order.side !== 'buy') {
+      throw new BadRequestException('Only buy orders can change exchange');
+    }
+    if (order.dealId) {
+      throw new BadRequestException('Cannot move an order from a closed deal');
+    }
+    if (order.archivedAt) {
+      throw new BadRequestException('Unarchive before changing exchange');
+    }
+    if (order.matchedSells.length > 0) {
+      throw new BadRequestException(
+        'Unlink all sells from this buy before changing exchange',
+      );
+    }
+
+    const prev = parseExchange(order.exchange);
+    if (prev === next) {
+      throw new BadRequestException('Buy is already on this exchange');
+    }
+
+    const conflict = await this.prisma.order.findUnique({
+      where: { exchange_ordId: { exchange: next, ordId: order.ordId } },
+      select: { id: true },
+    });
+    if (conflict) {
+      throw new BadRequestException(
+        `Order ${order.ordId} already exists on ${next}`,
+      );
+    }
+
+    const wasStaked = Boolean(order.stakedAt);
+    if (wasStaked) {
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: { stakedAt: null },
+      });
+      await this.moveEarnForBuy(order, 'unstake');
+    }
+
+    await this.prisma.order.update({
+      where: { id: order.id },
+      data: { exchange: next },
+    });
+
+    return {
+      moved: true,
+      exchange: next,
+      open: await this.listOpen({ exchange: prev }),
+      ...(wasStaked
+        ? { staking: await this.listStaking({ exchange: prev }) }
+        : {}),
+    };
+  }
+
   /**
    * After DB stake/unstake: move remaining base size Spot/Trading ↔ Earn.
    * Failures notify Telegram only; never roll back stakedAt.

@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from '../api'
-import { earnApiBase as earnPath, exchange, exchangeLabel, exchangeQuery } from '../exchange'
+import {
+  EXCHANGES,
+  type Exchange,
+  earnApiBase as earnPath,
+  exchange,
+  exchangeLabel,
+  exchangeQuery,
+} from '../exchange'
 import { prettyNum } from '../num'
 
 type OrderRow = {
@@ -505,6 +512,28 @@ async function stake(orderId: number) {
   }
 }
 
+function otherExchanges(): Exchange[] {
+  return EXCHANGES.filter((ex) => ex !== exchange.value)
+}
+
+async function changeExchange(orderId: number, next: Exchange) {
+  loading.value = true
+  error.value = ''
+  message.value = ''
+  try {
+    const res = await api<{ open: OpenResponse }>(`/orders/${orderId}/exchange`, {
+      method: 'POST',
+      body: JSON.stringify({ exchange: next }),
+    })
+    applyOpen(res.open)
+    message.value = `Buy moved to ${exchangeLabel(next)}`
+  } catch (e) {
+    error.value = (e as Error).message
+  } finally {
+    loading.value = false
+  }
+}
+
 async function unarchive(orderId: number) {
   loading.value = true
   error.value = ''
@@ -681,6 +710,18 @@ onUnmounted(() => {
             >
               Stake
             </button>
+            <template v-if="!buy.matchedSells.length">
+              <button
+                v-for="ex in otherExchanges()"
+                :key="ex"
+                class="linkish"
+                type="button"
+                :disabled="loading"
+                @click.stop="changeExchange(buy.id, ex)"
+              >
+                → {{ exchangeLabel(ex) }}
+              </button>
+            </template>
             <button
               class="linkish dangerish"
               type="button"
