@@ -380,18 +380,16 @@ onUnmounted(() => {
         <strong class="coin-link" @click.stop="selectInstrument(buy.instId)">{{ buy.instId }}</strong>
         <span class="muted">{{ fmt(buy.stakedAt) }}</span>
         <button class="linkish" type="button" @click="unstake(buy.id)">Unstake</button>
-        <template v-if="!buy.matchedSells.length">
-          <button
-            v-for="ex in otherExchanges()"
-            :key="ex"
-            class="linkish"
-            type="button"
-            :disabled="loading"
-            @click="changeExchange(buy.id, ex)"
-          >
-            → {{ exchangeLabel(ex) }}
-          </button>
-        </template>
+        <button
+          v-for="ex in otherExchanges()"
+          :key="ex"
+          class="linkish"
+          type="button"
+          :disabled="loading"
+          @click="changeExchange(buy.id, ex)"
+        >
+          → {{ exchangeLabel(ex) }}
+        </button>
       </div>
       <div class="meta">
         <span>Size {{ size(buy) }}</span>

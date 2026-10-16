@@ -710,18 +710,16 @@ onUnmounted(() => {
             >
               Stake
             </button>
-            <template v-if="!buy.matchedSells.length">
-              <button
-                v-for="ex in otherExchanges()"
-                :key="ex"
-                class="linkish"
-                type="button"
-                :disabled="loading"
-                @click.stop="changeExchange(buy.id, ex)"
-              >
-                → {{ exchangeLabel(ex) }}
-              </button>
-            </template>
+            <button
+              v-for="ex in otherExchanges()"
+              :key="ex"
+              class="linkish"
+              type="button"
+              :disabled="loading"
+              @click.stop="changeExchange(buy.id, ex)"
+            >
+              → {{ exchangeLabel(ex) }}
+            </button>
             <button
               class="linkish dangerish"
               type="button"

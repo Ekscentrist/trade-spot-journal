@@ -632,7 +632,13 @@ export class OrdersService {
       include: {
         matchedSells: {
           where: { dealId: null },
-          select: { id: true, allocatedSz: true, accFillSz: true, sz: true },
+          select: {
+            id: true,
+            ordId: true,
+            allocatedSz: true,
+            accFillSz: true,
+            sz: true,
+          },
         },
       },
     });
@@ -648,24 +654,26 @@ export class OrdersService {
     if (order.archivedAt) {
       throw new BadRequestException('Unarchive before changing exchange');
     }
-    if (order.matchedSells.length > 0) {
-      throw new BadRequestException(
-        'Unlink all sells from this buy before changing exchange',
-      );
-    }
 
     const prev = parseExchange(order.exchange);
     if (prev === next) {
       throw new BadRequestException('Buy is already on this exchange');
     }
 
-    const conflict = await this.prisma.order.findUnique({
-      where: { exchange_ordId: { exchange: next, ordId: order.ordId } },
-      select: { id: true },
+    const ordIdsToMove = [
+      order.ordId,
+      ...order.matchedSells.map((sell) => sell.ordId),
+    ];
+    const conflicts = await this.prisma.order.findMany({
+      where: {
+        exchange: next,
+        ordId: { in: ordIdsToMove },
+      },
+      select: { ordId: true },
     });
-    if (conflict) {
+    if (conflicts.length > 0) {
       throw new BadRequestException(
-        `Order ${order.ordId} already exists on ${next}`,
+        `Order ${conflicts.map((c) => c.ordId).join(', ')} already exists on ${next}`,
       );
     }
 
@@ -678,10 +686,21 @@ export class OrdersService {
       await this.moveEarnForBuy(order, 'unstake');
     }
 
-    await this.prisma.order.update({
-      where: { id: order.id },
-      data: { exchange: next },
-    });
+    const sellIds = order.matchedSells.map((sell) => sell.id);
+    await this.prisma.$transaction([
+      this.prisma.order.update({
+        where: { id: order.id },
+        data: { exchange: next },
+      }),
+      ...(sellIds.length
+        ? [
+            this.prisma.order.updateMany({
+              where: { id: { in: sellIds } },
+              data: { exchange: next },
+            }),
+          ]
+        : []),
+    ]);
 
     return {
       moved: true,
