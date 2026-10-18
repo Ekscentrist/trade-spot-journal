@@ -60,6 +60,9 @@ type MtmResponse = {
 
 const MTM_POLL_MS = 5_000
 const LEGACY_INST_KEY = 'trade_staking_instIds'
+const ENTRY_SORT_KEY = 'trade_staking_entrySort'
+
+type EntrySort = '' | 'asc' | 'desc'
 
 function instStorageKey(ex: string) {
   return `trade_staking_instIds_${ex}`
@@ -80,14 +83,27 @@ function readStoredInstIds(ex: string): string[] {
   }
 }
 
+function readStoredEntrySort(): EntrySort {
+  try {
+    const raw = localStorage.getItem(ENTRY_SORT_KEY)
+    if (raw === 'asc' || raw === 'desc') return raw
+    return ''
+  } catch {
+    return ''
+  }
+}
+
 const buys = ref<StakedBuy[]>([])
 const instruments = ref<string[]>([])
 const selectedInstIds = ref<string[]>(readStoredInstIds(exchange.value))
 const instrumentsOpen = ref(false)
+const entrySortOpen = ref(false)
+const entrySort = ref<EntrySort>(readStoredEntrySort())
 const error = ref('')
 const message = ref('')
 const loading = ref(false)
 const dropdownRoot = ref<HTMLElement | null>(null)
+const entrySortRoot = ref<HTMLElement | null>(null)
 const transferBuyId = ref<number | null>(null)
 const transferTarget = ref<Exchange | null>(null)
 let mtmTimer: ReturnType<typeof setInterval> | null = null
@@ -97,6 +113,28 @@ const selectedLabel = computed(() => {
   if (!selectedInstIds.value.length) return 'All coins'
   if (selectedInstIds.value.length === 1) return selectedInstIds.value[0]
   return `${selectedInstIds.value.length} coins`
+})
+
+const entrySortLabel = computed(() => {
+  if (entrySort.value === 'asc') return 'Entry: ↑ low→high'
+  if (entrySort.value === 'desc') return 'Entry: ↓ high→low'
+  return 'Entry: default'
+})
+
+const sortedBuys = computed(() => {
+  const mode = entrySort.value
+  if (!mode) return buys.value
+  const dir = mode === 'asc' ? 1 : -1
+  return [...buys.value].sort((a, b) => {
+    const ap = entryPriceNum(a)
+    const bp = entryPriceNum(b)
+    const aOk = Number.isFinite(ap)
+    const bOk = Number.isFinite(bp)
+    if (!aOk && !bOk) return 0
+    if (!aOk) return 1
+    if (!bOk) return -1
+    return (ap - bp) * dir
+  })
 })
 
 const unrealizedTotals = computed(() => {
@@ -117,6 +155,10 @@ function formatTotal(value: number) {
   const abs = Math.abs(value)
   const digits = abs >= 1000 ? 2 : abs >= 1 ? 4 : 6
   return value.toFixed(digits).replace(/\.?0+$/, '') || '0'
+}
+
+function entryPriceNum(o: OrderRow) {
+  return Number(o.avgPx || o.fillPx || o.px)
 }
 
 function price(o: OrderRow) {
@@ -164,15 +206,30 @@ function clearInstruments() {
   void load()
 }
 
+function setEntrySort(mode: EntrySort) {
+  entrySort.value = mode
+  entrySortOpen.value = false
+  try {
+    if (mode) localStorage.setItem(ENTRY_SORT_KEY, mode)
+    else localStorage.removeItem(ENTRY_SORT_KEY)
+  } catch {
+    // ignore storage errors
+  }
+}
+
 function resetFilters() {
   selectedInstIds.value = []
+  setEntrySort('')
   void load()
 }
 
 function onDocumentClick(event: MouseEvent) {
-  if (!dropdownRoot.value) return
-  if (!dropdownRoot.value.contains(event.target as Node)) {
+  const target = event.target as Node
+  if (dropdownRoot.value && !dropdownRoot.value.contains(target)) {
     instrumentsOpen.value = false
+  }
+  if (entrySortRoot.value && !entrySortRoot.value.contains(target)) {
+    entrySortOpen.value = false
   }
 }
 
@@ -371,7 +428,11 @@ onUnmounted(() => {
         </div>
 
         <div ref="dropdownRoot" class="dropdown">
-          <button class="secondary dropdown-trigger" type="button" @click="instrumentsOpen = !instrumentsOpen">
+          <button
+            class="secondary dropdown-trigger"
+            type="button"
+            @click="instrumentsOpen = !instrumentsOpen; entrySortOpen = false"
+          >
             {{ selectedLabel }}
             <span class="caret">▾</span>
           </button>
@@ -388,6 +449,46 @@ onUnmounted(() => {
           </div>
         </div>
 
+        <div ref="entrySortRoot" class="dropdown">
+          <button
+            class="secondary dropdown-trigger"
+            type="button"
+            @click="entrySortOpen = !entrySortOpen; instrumentsOpen = false"
+          >
+            {{ entrySortLabel }}
+            <span class="caret">▾</span>
+          </button>
+          <div v-if="entrySortOpen" class="dropdown-menu">
+            <div class="dropdown-head">
+              <span>Sort by entry</span>
+            </div>
+            <button
+              type="button"
+              class="sort-row"
+              :class="{ active: entrySort === '' }"
+              @click="setEntrySort('')"
+            >
+              Entry: default
+            </button>
+            <button
+              type="button"
+              class="sort-row"
+              :class="{ active: entrySort === 'asc' }"
+              @click="setEntrySort('asc')"
+            >
+              Entry: ↑ low→high
+            </button>
+            <button
+              type="button"
+              class="sort-row"
+              :class="{ active: entrySort === 'desc' }"
+              @click="setEntrySort('desc')"
+            >
+              Entry: ↓ high→low
+            </button>
+          </div>
+        </div>
+
         <button class="secondary" type="button" :disabled="loading" @click="resetFilters">Reset</button>
       </div>
     </div>
@@ -395,8 +496,8 @@ onUnmounted(() => {
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="message" class="ok-msg">{{ message }}</p>
 
-    <div v-if="!buys.length" class="empty">No staked buys</div>
-    <article v-for="buy in buys" :key="buy.id" class="card">
+    <div v-if="!sortedBuys.length" class="empty">No staked buys</div>
+    <article v-for="buy in sortedBuys" :key="buy.id" class="card">
       <div class="card-top">
         <span class="badge warn">staked</span>
         <strong class="coin-link" @click.stop="selectInstrument(buy.instId)">{{ buy.instId }}</strong>
@@ -576,6 +677,20 @@ p { margin: 0.2rem 0 0; color: var(--muted); }
 }
 .check-row:hover { background: rgba(255, 255, 255, 0.04); }
 .check-row input { width: auto; accent-color: var(--accent); }
+.sort-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  padding: 0.45rem;
+  color: var(--text);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.sort-row:hover { background: rgba(255, 255, 255, 0.04); }
+.sort-row.active { color: var(--ok); font-weight: 600; }
 .empty-mini { padding: 0.75rem; color: var(--muted); font-size: 0.88rem; }
 .muted { color: var(--muted); font-size: 0.9rem; }
 .ok-msg { color: var(--ok); font-size: 0.9rem; }

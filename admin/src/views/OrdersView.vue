@@ -83,12 +83,14 @@ type Status = {
 const MTM_POLL_MS = 5_000
 const EARN_POLL_MS = 15_000
 const LEGACY_INST_KEY = 'trade_orders_instIds'
+const ENTRY_SORT_KEY = 'trade_orders_entrySort'
 const WITHDRAW_AMTS = [50, 100, 200, 300, 500, 1000] as const
 const STABLE_ROWS = [
   { key: 'usdt' as const, ccy: 'USDT' as const },
   { key: 'usdc' as const, ccy: 'USDC' as const },
 ]
 
+type EntrySort = '' | 'asc' | 'desc'
 type StablePair = { spot: string; earn: string }
 type StableBalances = {
   usdt: StablePair
@@ -114,6 +116,16 @@ function readStoredInstIds(ex: string): string[] {
   }
 }
 
+function readStoredEntrySort(): EntrySort {
+  try {
+    const raw = localStorage.getItem(ENTRY_SORT_KEY)
+    if (raw === 'asc' || raw === 'desc') return raw
+    return ''
+  } catch {
+    return ''
+  }
+}
+
 const buys = ref<OpenBuy[]>([])
 const unlinkedSells = ref<OrderRow[]>([])
 const archivedSells = ref<OrderRow[]>([])
@@ -123,6 +135,8 @@ const selectedInstIds = ref<string[]>(readStoredInstIds(exchange.value))
 const status = ref<Status | null>(null)
 const conn = computed(() => status.value?.[exchange.value] ?? null)
 const instrumentsOpen = ref(false)
+const entrySortOpen = ref(false)
+const entrySort = ref<EntrySort>(readStoredEntrySort())
 const showArchivedSells = ref(false)
 const showArchivedBuys = ref(false)
 const error = ref('')
@@ -131,6 +145,7 @@ const loading = ref(false)
 const dropTargetId = ref<number | null>(null)
 const draggingSellId = ref<number | null>(null)
 const dropdownRoot = ref<HTMLElement | null>(null)
+const entrySortRoot = ref<HTMLElement | null>(null)
 const transferBuyId = ref<number | null>(null)
 const transferTarget = ref<Exchange | null>(null)
 let mtmTimer: ReturnType<typeof setInterval> | null = null
@@ -162,6 +177,28 @@ const selectedLabel = computed(() => {
   return `${selectedInstIds.value.length} coins`
 })
 
+const entrySortLabel = computed(() => {
+  if (entrySort.value === 'asc') return 'Entry: ↑ low→high'
+  if (entrySort.value === 'desc') return 'Entry: ↓ high→low'
+  return 'Entry: default'
+})
+
+const sortedBuys = computed(() => {
+  const mode = entrySort.value
+  if (!mode) return buys.value
+  const dir = mode === 'asc' ? 1 : -1
+  return [...buys.value].sort((a, b) => {
+    const ap = entryPriceNum(a)
+    const bp = entryPriceNum(b)
+    const aOk = Number.isFinite(ap)
+    const bOk = Number.isFinite(bp)
+    if (!aOk && !bOk) return 0
+    if (!aOk) return 1
+    if (!bOk) return -1
+    return (ap - bp) * dir
+  })
+})
+
 const unrealizedTotals = computed(() => {
   const map = new Map<string, number>()
   for (const buy of buys.value) {
@@ -187,6 +224,10 @@ function applyOpen(open: OpenResponse) {
   unlinkedSells.value = open.unlinkedSells
   archivedSells.value = open.archivedSells || []
   archivedBuys.value = open.archivedBuys || []
+}
+
+function entryPriceNum(o: OrderRow) {
+  return Number(o.avgPx || o.fillPx || o.px)
 }
 
 function price(o: OrderRow) {
@@ -234,15 +275,30 @@ function clearInstruments() {
   void load()
 }
 
+function setEntrySort(mode: EntrySort) {
+  entrySort.value = mode
+  entrySortOpen.value = false
+  try {
+    if (mode) localStorage.setItem(ENTRY_SORT_KEY, mode)
+    else localStorage.removeItem(ENTRY_SORT_KEY)
+  } catch {
+    // ignore storage errors
+  }
+}
+
 function resetFilters() {
   selectedInstIds.value = []
+  setEntrySort('')
   void load()
 }
 
 function onDocumentClick(event: MouseEvent) {
-  if (!dropdownRoot.value) return
-  if (!dropdownRoot.value.contains(event.target as Node)) {
+  const target = event.target as Node
+  if (dropdownRoot.value && !dropdownRoot.value.contains(target)) {
     instrumentsOpen.value = false
+  }
+  if (entrySortRoot.value && !entrySortRoot.value.contains(target)) {
+    entrySortOpen.value = false
   }
 }
 
@@ -631,7 +687,11 @@ onUnmounted(() => {
         </div>
 
         <div ref="dropdownRoot" class="dropdown">
-          <button class="secondary dropdown-trigger" type="button" @click="instrumentsOpen = !instrumentsOpen">
+          <button
+            class="secondary dropdown-trigger"
+            type="button"
+            @click="instrumentsOpen = !instrumentsOpen; entrySortOpen = false"
+          >
             {{ selectedLabel }}
             <span class="caret">▾</span>
           </button>
@@ -645,6 +705,46 @@ onUnmounted(() => {
               <span>{{ inst }}</span>
             </label>
             <div v-if="!instruments.length" class="empty-mini">No coins yet</div>
+          </div>
+        </div>
+
+        <div ref="entrySortRoot" class="dropdown">
+          <button
+            class="secondary dropdown-trigger"
+            type="button"
+            @click="entrySortOpen = !entrySortOpen; instrumentsOpen = false"
+          >
+            {{ entrySortLabel }}
+            <span class="caret">▾</span>
+          </button>
+          <div v-if="entrySortOpen" class="dropdown-menu">
+            <div class="dropdown-head">
+              <span>Sort by entry</span>
+            </div>
+            <button
+              type="button"
+              class="sort-row"
+              :class="{ active: entrySort === '' }"
+              @click="setEntrySort('')"
+            >
+              Entry: default
+            </button>
+            <button
+              type="button"
+              class="sort-row"
+              :class="{ active: entrySort === 'asc' }"
+              @click="setEntrySort('asc')"
+            >
+              Entry: ↑ low→high
+            </button>
+            <button
+              type="button"
+              class="sort-row"
+              :class="{ active: entrySort === 'desc' }"
+              @click="setEntrySort('desc')"
+            >
+              Entry: ↓ high→low
+            </button>
           </div>
         </div>
 
@@ -711,9 +811,9 @@ onUnmounted(() => {
     <div class="board">
       <section class="column">
         <h2>Open buys</h2>
-        <div v-if="!buys.length" class="empty">No open buys</div>
+        <div v-if="!sortedBuys.length" class="empty">No open buys</div>
         <article
-          v-for="buy in buys"
+          v-for="buy in sortedBuys"
           :key="buy.id"
           class="card buy-card"
           :class="{ droppable: dropTargetId === buy.id }"
@@ -1008,6 +1108,20 @@ p { margin: 0.2rem 0 0; color: var(--muted); }
 }
 .check-row:hover { background: rgba(255, 255, 255, 0.04); }
 .check-row input { width: auto; accent-color: var(--accent); }
+.sort-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  padding: 0.45rem;
+  color: var(--text);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.sort-row:hover { background: rgba(255, 255, 255, 0.04); }
+.sort-row.active { color: var(--ok); font-weight: 600; }
 .empty-mini { padding: 0.75rem; color: var(--muted); font-size: 0.88rem; }
 .status {
   display: flex;
