@@ -21,6 +21,10 @@ const ACCT_TRADING = '18';
 
 const MAX_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 2000;
+/** Wait for Simple Earn redeem to credit Funding before transfer. */
+const POST_REDEEM_POLL_ATTEMPTS = 30;
+const POST_REDEEM_POLL_MS = 1000;
+const POST_REDEEM_TRANSFER_ATTEMPTS = 3;
 
 export const STABLE_CCYS = ['USDT', 'USDC'] as const;
 export type StableCcy = (typeof STABLE_CCYS)[number];
@@ -298,9 +302,14 @@ export class OkxEarnFundService {
     }
 
     const redeemAmt = formatAmt(Math.min(earnAmt, need));
-    if (parseAmt(redeemAmt) <= DUST_AMT) {
+    const redeemNeed = parseAmt(redeemAmt);
+    if (redeemNeed <= DUST_AMT) {
       throw new BadRequestException(`Redeem amount too small for ${ccy}`);
     }
+
+    // Snapshot Spot before redeem — OKX credits Funding, not Trading.
+    // Absolute trading >= need must not skip the Funding→Spot transfer.
+    const tradingBefore = await this.getTradingAvail(creds, ccy);
 
     await okxRestRequest(
       creds,
@@ -315,7 +324,7 @@ export class OkxEarnFundService {
     );
     this.logger.log(`OKX Earn redeem ${redeemAmt} ${ccy} (${context})`);
 
-    await this.moveFundingToTrading(creds, ccy, need);
+    await this.moveFundingToTrading(creds, ccy, redeemNeed, tradingBefore);
   }
 
   private async notifyError(context: string, ccy: string, detail: string) {
@@ -464,42 +473,88 @@ export class OkxEarnFundService {
     return parseAmt(row?.bal);
   }
 
+  /**
+   * After Earn redeem, drain Funding → Trading (Spot).
+   * Success = Trading grew by ~need from tradingBefore, or Funding is empty
+   * after a successful transfer. Never skip transfer just because Spot already
+   * held >= need before redeem.
+   */
   private async moveFundingToTrading(
     creds: OkxCredentials,
     ccy: string,
     need: number,
+    tradingBefore: number,
   ): Promise<number> {
+    const targetTrading = tradingBefore + need;
     let trading = 0;
     let funding = 0;
 
-    for (let attempt = 0; attempt < 8; attempt++) {
-      if (attempt > 0) await sleep(1000);
+    for (let attempt = 0; attempt < POST_REDEEM_POLL_ATTEMPTS; attempt++) {
+      if (attempt > 0) await sleep(POST_REDEEM_POLL_MS);
       trading = await this.getTradingAvail(creds, ccy);
       funding = await this.getFundingAvail(creds, ccy);
       this.logger.log(
-        `OKX post-redeem ${ccy}: trading=${formatAmt(trading)} funding=${formatAmt(funding)} (try ${attempt + 1})`,
+        `OKX post-redeem ${ccy}: trading=${formatAmt(trading)} funding=${formatAmt(funding)} (try ${attempt + 1}/${POST_REDEEM_POLL_ATTEMPTS})`,
       );
-      if (trading >= need - DUST_AMT) return trading;
+      if (trading >= targetTrading - DUST_AMT) return trading;
       if (funding > DUST_AMT) break;
     }
 
-    if (funding > DUST_AMT) {
-      const move = formatAmt(
-        Math.min(funding, Math.max(need - trading, funding)),
-      );
+    let lastError: string | null = null;
+    for (
+      let attempt = 1;
+      attempt <= POST_REDEEM_TRANSFER_ATTEMPTS;
+      attempt++
+    ) {
+      trading = await this.getTradingAvail(creds, ccy);
+      funding = await this.getFundingAvail(creds, ccy);
+
+      if (trading >= targetTrading - DUST_AMT) return trading;
+
+      if (funding <= DUST_AMT) {
+        if (attempt < POST_REDEEM_TRANSFER_ATTEMPTS) {
+          await sleep(POST_REDEEM_POLL_MS);
+          continue;
+        }
+        break;
+      }
+
+      // Drain funding for this ccy (covers redeem + any leftover stuck balance).
+      const move = formatAmt(funding);
       try {
         await this.transfer(creds, ccy, move, ACCT_FUNDING, ACCT_TRADING);
         await sleep(800);
         trading = await this.getTradingAvail(creds, ccy);
+        funding = await this.getFundingAvail(creds, ccy);
+        if (
+          trading >= targetTrading - DUST_AMT ||
+          funding <= DUST_AMT
+        ) {
+          return trading;
+        }
       } catch (error) {
+        lastError = (error as Error).message;
         this.logger.warn(
-          `OKX transfer to trading ${ccy} failed: ${(error as Error).message}`,
+          `OKX transfer to trading ${ccy} attempt ${attempt}/${POST_REDEEM_TRANSFER_ATTEMPTS}: ${lastError}`,
         );
-        trading = await this.getTradingAvail(creds, ccy);
+        if (
+          attempt < POST_REDEEM_TRANSFER_ATTEMPTS &&
+          this.isRetryableBalanceError(lastError)
+        ) {
+          await sleep(RETRY_DELAY_MS);
+          continue;
+        }
       }
     }
 
-    return trading;
+    trading = await this.getTradingAvail(creds, ccy);
+    funding = await this.getFundingAvail(creds, ccy);
+    if (trading >= targetTrading - DUST_AMT) return trading;
+
+    throw new BadRequestException(
+      lastError ||
+        `post-redeem ${ccy}: trading=${formatAmt(trading)} funding=${formatAmt(funding)} (expected +${formatAmt(need)})`,
+    );
   }
 
   private async rollbackFundingToTrading(
