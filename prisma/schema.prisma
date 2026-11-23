@@ -39,6 +39,8 @@ model Order {
   accFillSz    String?   @db.VarChar(64)
   fee          String?   @db.VarChar(64)
   feeCcy       String?   @db.VarChar(32)
+  /// Fee converted to quote at fill time when paid in a third coin (GT, BGB)
+  feeQuote     String?   @db.VarChar(64)
   rawJson      Json?
   filledAt     DateTime?
   notifiedAt   DateTime?

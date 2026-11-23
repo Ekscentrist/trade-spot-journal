@@ -14,12 +14,15 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { getLastPrices } from './tickers.js';
 import {
   CLOSE_THRESHOLD,
+  absDecimal,
   calcOpenBuyMtm,
   calcRoundTrip,
   cleanDecimal,
   formatNum,
+  isThirdCoinFee,
   orderSize,
   parseNum,
+  quoteCurrency,
 } from './trade-math.js';
 
 export type FillPayload = {
@@ -60,6 +63,7 @@ const orderSelect = {
   accFillSz: true,
   fee: true,
   feeCcy: true,
+  feeQuote: true,
   filledAt: true,
   notifiedAt: true,
   matchedBuyId: true,
@@ -270,6 +274,7 @@ export class OrdersService {
         accFillSz: true,
         fee: true,
         feeCcy: true,
+        feeQuote: true,
         matchedSells: {
           where: { dealId: null, archivedAt: null },
           select: {
@@ -281,6 +286,7 @@ export class OrdersService {
             accFillSz: true,
             fee: true,
             feeCcy: true,
+            feeQuote: true,
           },
         },
       },
@@ -416,7 +422,9 @@ export class OrdersService {
       throw new BadRequestException('Target must be a buy order');
     }
     if (sell.exchange !== buy.exchange) {
-      throw new BadRequestException('Sell and buy must be from the same exchange');
+      throw new BadRequestException(
+        'Sell and buy must be from the same exchange',
+      );
     }
     if (sell.dealId || buy.dealId) {
       throw new BadRequestException('Order already belongs to a closed deal');
@@ -507,7 +515,9 @@ export class OrdersService {
       throw new BadRequestException('Only buy/sell orders can be archived');
     }
     if (order.dealId) {
-      throw new BadRequestException('Cannot archive an order from a closed deal');
+      throw new BadRequestException(
+        'Cannot archive an order from a closed deal',
+      );
     }
     if (order.side === 'sell' && order.matchedBuyId) {
       throw new BadRequestException('Unlink the sell before archiving');
@@ -536,7 +546,9 @@ export class OrdersService {
   }
 
   async unarchive(orderId: number) {
-    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+    });
     if (!order) {
       throw new NotFoundException('Order not found');
     }
@@ -852,6 +864,13 @@ export class OrdersService {
       payload.fillTime || payload.uTime || payload.cTime,
     );
 
+    const where = {
+      exchange_ordId: { exchange, ordId: payload.ordId },
+    };
+
+    const existing = await this.prisma.order.findUnique({ where });
+    const fees = await this.resolveFee(exchange, payload, existing);
+
     const data = {
       clOrdId: payload.clOrdId || null,
       instId: payload.instId,
@@ -863,17 +882,10 @@ export class OrdersService {
       fillPx: cleanDecimal(payload.fillPx),
       avgPx: cleanDecimal(payload.avgPx),
       accFillSz: cleanDecimal(payload.accFillSz),
-      fee: cleanDecimal(payload.fee),
-      feeCcy: payload.feeCcy || null,
+      ...fees,
       rawJson: payload as unknown as Prisma.InputJsonValue,
       filledAt,
     };
-
-    const where = {
-      exchange_ordId: { exchange, ordId: payload.ordId },
-    };
-
-    const existing = await this.prisma.order.findUnique({ where });
 
     let order;
     try {
@@ -908,10 +920,65 @@ export class OrdersService {
       prior!.accFillSz !== payload.accFillSz;
 
     const shouldNotify =
-      isFill &&
-      (!latest?.notifiedAt || stateChanged || fillIncreased);
+      isFill && (!latest?.notifiedAt || stateChanged || fillIncreased);
 
     return { order, shouldNotify, previous: existing };
+  }
+
+  /**
+   * Fee fields for an upsert: stored positive, never replaced by an empty/zero
+   * value once a real fee is known, and converted to quote at fill time when
+   * paid in a third coin (Gate GT, Bitget BGB).
+   */
+  private async resolveFee(
+    exchange: Exchange,
+    payload: FillPayload,
+    existing: {
+      fee: string | null;
+      feeCcy: string | null;
+      feeQuote: string | null;
+    } | null,
+  ): Promise<{
+    fee: string | null;
+    feeCcy: string | null;
+    feeQuote: string | null;
+  }> {
+    const fee = absDecimal(cleanDecimal(payload.fee));
+    const feeCcy = payload.feeCcy || null;
+
+    if (!parseNum(fee) && existing && parseNum(existing.fee)) {
+      return {
+        fee: existing.fee,
+        feeCcy: existing.feeCcy,
+        feeQuote: existing.feeQuote,
+      };
+    }
+
+    if (!parseNum(fee) || !isThirdCoinFee(feeCcy, payload.instId)) {
+      return { fee, feeCcy, feeQuote: null };
+    }
+
+    if (
+      existing?.feeQuote &&
+      existing.fee === fee &&
+      existing.feeCcy === feeCcy
+    ) {
+      return { fee, feeCcy, feeQuote: existing.feeQuote };
+    }
+
+    const quote = quoteCurrency(payload.instId);
+    const pair = `${feeCcy!.toUpperCase()}-${quote}`;
+    let feeQuote: string | null = null;
+    try {
+      const prices = await getLastPrices([pair], exchange);
+      const px = prices.get(pair);
+      if (px) feeQuote = formatNum(parseNum(fee) * px, 8);
+    } catch (error) {
+      this.logger.warn(
+        `Fee conversion ${pair} failed: ${(error as Error).message}`,
+      );
+    }
+    return { fee, feeCcy, feeQuote };
   }
 
   async upsertFromOkx(payload: FillPayload) {

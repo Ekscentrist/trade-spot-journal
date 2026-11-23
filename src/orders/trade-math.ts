@@ -36,7 +36,10 @@ export function feeInQuote(
   feeCcy: string | null | undefined,
   instId: string,
   price: number,
+  feeQuote?: string | null,
 ): number {
+  const converted = Math.abs(parseNum(feeQuote));
+  if (converted) return converted;
   const amount = Math.abs(parseNum(fee));
   if (!amount) return 0;
   const quote = quoteCurrency(instId);
@@ -44,8 +47,30 @@ export function feeInQuote(
   const ccy = (feeCcy || quote).toUpperCase();
   if (ccy === quote.toUpperCase()) return amount;
   if (ccy === base.toUpperCase()) return amount * price;
-  // Unknown fee currency — treat as quote to avoid ignoring costs entirely.
+  // Unknown fee currency without a stored conversion (e.g. Gate POINT ≈ 1 USDT)
+  // — treat as quote to avoid ignoring costs entirely.
   return amount;
+}
+
+/** True when the fee is paid in neither base nor quote of the instrument. */
+export function isThirdCoinFee(
+  feeCcy: string | null | undefined,
+  instId: string,
+): boolean {
+  if (!feeCcy) return false;
+  const ccy = feeCcy.toUpperCase();
+  return (
+    ccy !== baseCurrency(instId).toUpperCase() &&
+    ccy !== quoteCurrency(instId).toUpperCase()
+  );
+}
+
+/** Exchanges report fees as negative (Bitget) or positive numbers — store positive. */
+export function absDecimal(value?: string | null): string | null {
+  if (value == null) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  return raw.startsWith('-') ? raw.slice(1) : raw;
 }
 
 export function formatNum(value: number, digits = 8): string {
@@ -106,6 +131,7 @@ export function calcRoundTrip(params: {
     px?: string | null;
     fee?: string | null;
     feeCcy?: string | null;
+    feeQuote?: string | null;
   };
   sells: Array<{
     accFillSz?: string | null;
@@ -116,6 +142,7 @@ export function calcRoundTrip(params: {
     px?: string | null;
     fee?: string | null;
     feeCcy?: string | null;
+    feeQuote?: string | null;
   }>;
 }): PnlParts {
   const buySz = orderSize(params.buy);
@@ -126,6 +153,7 @@ export function calcRoundTrip(params: {
     params.buy.feeCcy,
     params.instId,
     buyAvgPx,
+    params.buy.feeQuote,
   );
 
   let sellSz = 0;
@@ -137,7 +165,13 @@ export function calcRoundTrip(params: {
     const px = orderPrice(sell);
     sellSz += sz;
     sellNotional += sz * px;
-    sellFeeQuote += feeInQuote(sell.fee, sell.feeCcy, params.instId, px);
+    sellFeeQuote += feeInQuote(
+      sell.fee,
+      sell.feeCcy,
+      params.instId,
+      px,
+      sell.feeQuote,
+    );
   }
 
   const sellAvgPx = sellSz > 0 ? sellNotional / sellSz : 0;
@@ -177,7 +211,11 @@ export function calcOpenBuyMtm(params: {
   const base = calcRoundTrip(params);
   const remainingSz = Math.max(base.buySz - base.sellSz, 0);
 
-  if (params.lastPx == null || !Number.isFinite(params.lastPx) || params.lastPx <= 0) {
+  if (
+    params.lastPx == null ||
+    !Number.isFinite(params.lastPx) ||
+    params.lastPx <= 0
+  ) {
     return {
       ...base,
       remainingSz,

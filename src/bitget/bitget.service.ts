@@ -9,6 +9,7 @@ import WebSocket from 'ws';
 import { OrdersService, type FillPayload } from '../orders/orders.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { TelegramService } from '../telegram/telegram.service.js';
+import { parseBitgetFee } from './bitget-fee.js';
 
 type ConnectionStatus = {
   connected: boolean;
@@ -55,46 +56,6 @@ export function bitgetSymbolToInstId(symbol: string): string {
   return compact;
 }
 
-function parseFee(item: BitgetOrderRaw): { fee?: string; feeCcy?: string } {
-  if (item.fillFee) {
-    return { fee: String(item.fillFee), feeCcy: item.fillFeeCoin };
-  }
-
-  const detail = item.feeDetail;
-  if (Array.isArray(detail) && detail[0] && typeof detail[0] === 'object') {
-    const row = detail[0] as { fee?: string; feeCoin?: string };
-    return {
-      fee: row.fee != null ? String(row.fee) : undefined,
-      feeCcy: row.feeCoin,
-    };
-  }
-
-  if (typeof detail === 'string' && detail) {
-    try {
-      const parsed = JSON.parse(detail) as Record<string, unknown>;
-      for (const [key, value] of Object.entries(parsed)) {
-        if (key === 'newFees' || !value || typeof value !== 'object') continue;
-        const row = value as {
-          feeCoin?: string;
-          totalFee?: number | string;
-          fee?: number | string;
-        };
-        if (row.feeCoin) {
-          const amount = row.totalFee ?? row.fee;
-          return {
-            fee: amount != null ? String(amount) : undefined,
-            feeCcy: row.feeCoin,
-          };
-        }
-      }
-    } catch {
-      // ignore malformed feeDetail
-    }
-  }
-
-  return {};
-}
-
 function normalizeBitgetState(raw: string): string {
   const state = raw.trim().toLowerCase();
   if (state === 'partial_fill' || state === 'partiallyfilled') {
@@ -110,11 +71,12 @@ function toFillPayload(item: BitgetOrderRaw): FillPayload | null {
   const ordId = String(item.orderId || '');
   const symbol = String(item.instId || item.symbol || '');
   if (!ordId || !symbol) return null;
-  const { fee, feeCcy } = parseFee(item);
+  const instId = bitgetSymbolToInstId(symbol);
+  const { fee, feeCcy } = parseBitgetFee(item, instId);
   return {
     ordId,
     clOrdId: item.clientOid,
-    instId: bitgetSymbolToInstId(symbol),
+    instId,
     side: String(item.side || '').toLowerCase(),
     ordType: item.orderType,
     state: normalizeBitgetState(String(item.status || item.state || '')),

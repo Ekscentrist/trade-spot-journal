@@ -17,6 +17,7 @@ import {
   parseAmt,
   signGateWs,
 } from './gate-rest.js';
+import { parseGateFee } from './gate-fee.js';
 
 type ConnectionStatus = {
   connected: boolean;
@@ -43,6 +44,8 @@ type GateOrderRaw = {
   avg_deal_price?: string;
   fee?: string;
   fee_currency?: string;
+  gt_fee?: string;
+  point_fee?: string;
   create_time?: string;
   create_time_ms?: string;
   update_time?: string;
@@ -82,6 +85,7 @@ function toFillPayload(item: GateOrderRaw): FillPayload | null {
 
   const filled = filledBase(item);
   const avgPx = item.avg_deal_price;
+  const { fee, feeCcy } = parseGateFee(item);
   return {
     ordId,
     clOrdId: item.text,
@@ -94,8 +98,8 @@ function toFillPayload(item: GateOrderRaw): FillPayload | null {
     fillPx: avgPx,
     avgPx,
     accFillSz: filled > 0 ? String(filled) : undefined,
-    fee: item.fee,
-    feeCcy: item.fee_currency,
+    fee,
+    feeCcy,
     fillTime: item.update_time_ms || item.update_time,
     uTime: item.update_time_ms || item.update_time,
     cTime: item.create_time_ms || item.create_time,
