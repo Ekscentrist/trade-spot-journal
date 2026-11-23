@@ -1,15 +1,23 @@
+import { ref } from 'vue'
+
 const TOKEN_KEY = 'trade_token'
 
+// Reactive mirror of the stored token so computed state (e.g. the header)
+// updates right after login/logout without a page reload.
+const tokenRef = ref<string | null>(localStorage.getItem(TOKEN_KEY))
+
 export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY)
+  return tokenRef.value
 }
 
 export function setToken(token: string) {
   localStorage.setItem(TOKEN_KEY, token)
+  tokenRef.value = token
 }
 
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY)
+  tokenRef.value = null
 }
 
 export async function api<T>(
