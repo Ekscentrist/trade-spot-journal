@@ -57,6 +57,14 @@ function totals(rows: OrderRow[], calc: (o: OrderRow, q: string) => number | nul
     .map(([q, total]) => fmtQuote(total, q))
 }
 
+const shownOrders = computed(() =>
+  [...shownBuys.value, ...shownSells.value].sort(
+    (a, b) =>
+      new Date(b.archivedAt || 0).getTime() - new Date(a.archivedAt || 0).getTime() ||
+      b.id - a.id,
+  ),
+)
+
 const spentTotals = computed(() => totals(shownBuys.value, buySpent))
 const gotTotals = computed(() => totals(shownSells.value, sellReceived))
 
@@ -167,63 +175,36 @@ onMounted(() => void load())
     <div v-if="error" class="error">{{ error }}</div>
     <div v-if="message" class="ok-msg">{{ message }}</div>
 
-    <div class="board">
-      <section class="column">
-        <h2>
-          Archived buys ({{ shownBuys.length }})
-          <span v-if="spentTotals.length" class="total">
-            spent <span class="neg">{{ spentTotals.join(' · ') }}</span>
-          </span>
-        </h2>
-        <div v-if="!shownBuys.length" class="empty">No archived buys</div>
-        <article v-for="o in shownBuys" :key="o.id" class="card">
-          <div class="card-top">
-            <span class="badge buy">buy</span>
-            <strong class="coin-link" @click="instId = o.instId">{{ o.instId }}</strong>
-            <button class="linkish" type="button" :disabled="loading" @click="restore(o)">Restore</button>
-            <button class="linkish dangerish" type="button" :disabled="loading" @click="remove(o)">Delete</button>
-          </div>
-          <div class="meta">
-            <span>Size {{ size(o) }}</span>
-            <span>Px {{ price(o) }}</span>
-            <span>Spent <span class="neg">{{ spentLabel(o) }}</span></span>
-            <span>Fee {{ feeLabel(o) }}</span>
-          </div>
-          <div class="meta dates">
-            <span class="muted">filled {{ fmt(o.filledAt) }}</span>
-            <span class="muted">archived {{ fmt(o.archivedAt) }}</span>
-          </div>
-        </article>
-      </section>
-
-      <section class="column">
-        <h2>
-          Archived sells ({{ shownSells.length }})
-          <span v-if="gotTotals.length" class="total">
-            got <span class="pos">{{ gotTotals.join(' · ') }}</span>
-          </span>
-        </h2>
-        <div v-if="!shownSells.length" class="empty">No archived sells</div>
-        <article v-for="o in shownSells" :key="o.id" class="card">
-          <div class="card-top">
-            <span class="badge sell">sell</span>
-            <strong class="coin-link" @click="instId = o.instId">{{ o.instId }}</strong>
-            <button class="linkish" type="button" :disabled="loading" @click="restore(o)">Restore</button>
-            <button class="linkish dangerish" type="button" :disabled="loading" @click="remove(o)">Delete</button>
-          </div>
-          <div class="meta">
-            <span>Size {{ size(o) }}</span>
-            <span>Px {{ price(o) }}</span>
-            <span>Got <span class="pos">{{ receivedLabel(o) }}</span></span>
-            <span>Fee {{ feeLabel(o) }}</span>
-          </div>
-          <div class="meta dates">
-            <span class="muted">filled {{ fmt(o.filledAt) }}</span>
-            <span class="muted">archived {{ fmt(o.archivedAt) }}</span>
-          </div>
-        </article>
-      </section>
+    <div class="summary">
+      <span>{{ shownOrders.length }} orders</span>
+      <span v-if="spentTotals.length">
+        spent <span class="neg">{{ spentTotals.join(' · ') }}</span>
+      </span>
+      <span v-if="gotTotals.length">
+        got <span class="pos">{{ gotTotals.join(' · ') }}</span>
+      </span>
     </div>
+
+    <div v-if="!shownOrders.length" class="empty">No archived orders</div>
+    <article v-for="o in shownOrders" :key="o.id" class="card">
+      <div class="card-top">
+        <span class="badge" :class="o.side">{{ o.side }}</span>
+        <strong class="coin-link" @click="instId = o.instId">{{ o.instId }}</strong>
+        <button class="linkish" type="button" :disabled="loading" @click="restore(o)">Restore</button>
+        <button class="linkish dangerish" type="button" :disabled="loading" @click="remove(o)">Delete</button>
+      </div>
+      <div class="meta">
+        <span>Size {{ size(o) }}</span>
+        <span>Px {{ price(o) }}</span>
+        <span v-if="o.side === 'buy'">Spent <span class="neg">{{ spentLabel(o) }}</span></span>
+        <span v-else>Got <span class="pos">{{ receivedLabel(o) }}</span></span>
+        <span>Fee {{ feeLabel(o) }}</span>
+      </div>
+      <div class="meta dates">
+        <span class="muted">filled {{ fmt(o.filledAt) }}</span>
+        <span class="muted">archived {{ fmt(o.archivedAt) }}</span>
+      </div>
+    </article>
   </div>
 </template>
 
@@ -237,38 +218,24 @@ onMounted(() => void load())
   flex-wrap: wrap;
 }
 h1 { margin: 0; font-size: 1.35rem; }
-h2 {
-  margin: 0 0 0.75rem;
-  font-size: 1rem;
-  color: var(--muted);
-  font-weight: 600;
+.summary {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: baseline;
+  gap: 1rem;
+  color: var(--muted);
+  font-weight: 600;
 }
-.total { font-size: 0.88rem; font-weight: 500; }
 .actions {
   display: flex;
   gap: 0.5rem;
   align-items: center;
-  flex-wrap: wrap;
 }
-.board {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1rem;
-}
-@media (max-width: 900px) {
-  .board { grid-template-columns: 1fr; }
-}
-.column { min-width: 0; }
+.actions select { width: auto; min-width: 150px; }
 .card {
   border: 1px solid var(--line);
   background: var(--bg-elevated);
   border-radius: 12px;
   padding: 0.85rem;
-  margin-bottom: 0.75rem;
 }
 .card-top {
   display: flex;
