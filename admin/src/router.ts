@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { getToken } from './api'
+import ArchiveView from './views/ArchiveView.vue'
 import DealsView from './views/DealsView.vue'
 import LoginView from './views/LoginView.vue'
 import OrdersView from './views/OrdersView.vue'
@@ -13,6 +14,7 @@ const router = createRouter({
     { path: '/', name: 'orders', component: OrdersView },
     { path: '/staking', name: 'staking', component: StakingView },
     { path: '/deals', name: 'deals', component: DealsView },
+    { path: '/archive', name: 'archive', component: ArchiveView },
     { path: '/settings', name: 'settings', component: SettingsView },
   ],
 })

@@ -70,6 +70,7 @@ const orderSelect = {
   allocatedSz: true,
   dealId: true,
   archivedAt: true,
+  deletedAt: true,
   stakedAt: true,
   createdAt: true,
   updatedAt: true,
@@ -102,6 +103,7 @@ export class OrdersService {
         exchange: params.exchange,
         ...(instIds.length ? { instId: { in: instIds } } : {}),
         ...(side ? { side } : {}),
+        deletedAt: null,
         state: { in: ['filled', 'partially_filled'] },
       },
       orderBy: [{ filledAt: 'desc' }, { updatedAt: 'desc' }],
@@ -114,6 +116,7 @@ export class OrdersService {
     const rows = await this.prisma.order.findMany({
       where: {
         exchange,
+        deletedAt: null,
         state: { in: ['filled', 'partially_filled'] },
       },
       distinct: ['instId'],
@@ -168,34 +171,6 @@ export class OrdersService {
       select: orderSelect,
     });
 
-    const archivedSells = await this.prisma.order.findMany({
-      where: {
-        exchange,
-        side: 'sell',
-        dealId: null,
-        matchedBuyId: null,
-        archivedAt: { not: null },
-        state: { in: ['filled', 'partially_filled'] },
-        ...(instIds.length ? { instId: { in: instIds } } : {}),
-      },
-      orderBy: [{ archivedAt: 'desc' }, { id: 'desc' }],
-      select: orderSelect,
-    });
-
-    const archivedBuys = await this.prisma.order.findMany({
-      where: {
-        exchange,
-        side: 'buy',
-        dealId: null,
-        archivedAt: { not: null },
-        stakedAt: null,
-        state: { in: ['filled', 'partially_filled'] },
-        ...(instIds.length ? { instId: { in: instIds } } : {}),
-      },
-      orderBy: [{ archivedAt: 'desc' }, { id: 'desc' }],
-      select: orderSelect,
-    });
-
     const prices = await getLastPrices(
       buys.map((buy) => buy.instId),
       exchange,
@@ -227,22 +202,54 @@ export class OrdersService {
     });
 
     if (side === 'buy') {
-      return {
-        buys: openBuys,
-        unlinkedSells: [],
-        archivedSells: [],
-        archivedBuys,
-      };
+      return { buys: openBuys, unlinkedSells: [] };
     }
     if (side === 'sell') {
-      return {
-        buys: [],
-        unlinkedSells,
-        archivedSells,
-        archivedBuys: [],
-      };
+      return { buys: [], unlinkedSells };
     }
-    return { buys: openBuys, unlinkedSells, archivedSells, archivedBuys };
+    return { buys: openBuys, unlinkedSells };
+  }
+
+  /** Archived, not deleted buys without sells and sells without a buy. */
+  async listArchive(params: {
+    exchange: Exchange;
+    instIds?: string[];
+    side?: string;
+  }) {
+    const instIds = (params.instIds || []).filter(Boolean);
+    const side =
+      params.side === 'buy' || params.side === 'sell' ? params.side : undefined;
+    const base = {
+      exchange: params.exchange,
+      dealId: null,
+      archivedAt: { not: null },
+      deletedAt: null,
+      state: { in: ['filled', 'partially_filled'] },
+      ...(instIds.length ? { instId: { in: instIds } } : {}),
+    } satisfies Prisma.OrderWhereInput;
+    const orderBy: Prisma.OrderOrderByWithRelationInput[] = [
+      { archivedAt: 'desc' },
+      { id: 'desc' },
+    ];
+
+    const [buys, sells] = await Promise.all([
+      side === 'sell'
+        ? Promise.resolve([])
+        : this.prisma.order.findMany({
+            where: { ...base, side: 'buy', stakedAt: null },
+            orderBy,
+            select: orderSelect,
+          }),
+      side === 'buy'
+        ? Promise.resolve([])
+        : this.prisma.order.findMany({
+            where: { ...base, side: 'sell', matchedBuyId: null },
+            orderBy,
+            select: orderSelect,
+          }),
+    ]);
+
+    return { buys, sells };
   }
 
   async listMtm(params: {
@@ -552,6 +559,9 @@ export class OrdersService {
     if (!order) {
       throw new NotFoundException('Order not found');
     }
+    if (order.deletedAt) {
+      throw new NotFoundException('Order not found');
+    }
     if (!order.archivedAt) {
       throw new BadRequestException('Order is not archived');
     }
@@ -563,7 +573,37 @@ export class OrdersService {
 
     return {
       unarchived: true,
-      open: await this.listOpen({ exchange: parseExchange(order.exchange) }),
+      archive: await this.listArchive({
+        exchange: parseExchange(order.exchange),
+      }),
+    };
+  }
+
+  /** Soft delete: only archived orders; deleted orders are hidden everywhere. */
+  async softDelete(orderId: number) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+    });
+    if (!order || order.deletedAt) {
+      throw new NotFoundException('Order not found');
+    }
+    if (order.dealId) {
+      throw new BadRequestException('Cannot delete an order from a closed deal');
+    }
+    if (!order.archivedAt) {
+      throw new BadRequestException('Archive the order before deleting');
+    }
+
+    await this.prisma.order.update({
+      where: { id: order.id },
+      data: { deletedAt: new Date() },
+    });
+
+    return {
+      deleted: true,
+      archive: await this.listArchive({
+        exchange: parseExchange(order.exchange),
+      }),
     };
   }
 
@@ -920,7 +960,9 @@ export class OrdersService {
       prior!.accFillSz !== payload.accFillSz;
 
     const shouldNotify =
-      isFill && (!latest?.notifiedAt || stateChanged || fillIncreased);
+      isFill &&
+      !latest?.deletedAt &&
+      (!latest?.notifiedAt || stateChanged || fillIncreased);
 
     return { order, shouldNotify, previous: existing };
   }
@@ -990,6 +1032,7 @@ export class OrdersService {
       where: {
         exchange,
         notifiedAt: null,
+        deletedAt: null,
         state: { in: ['filled', 'partially_filled'] },
       },
       orderBy: [{ filledAt: 'asc' }, { id: 'asc' }],

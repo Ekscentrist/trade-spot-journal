@@ -48,6 +48,7 @@ model Order {
   allocatedSz  String?   @db.VarChar(64)
   dealId       Int?
   archivedAt   DateTime?
+  deletedAt    DateTime?
   stakedAt     DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -66,6 +67,7 @@ model Order {
   @@index([dealId])
   @@index([side])
   @@index([archivedAt])
+  @@index([deletedAt])
   @@index([stakedAt])
 }
 

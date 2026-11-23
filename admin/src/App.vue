@@ -91,6 +91,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         <RouterLink to="/">Orders</RouterLink>
         <RouterLink to="/staking">Staking</RouterLink>
         <RouterLink to="/deals">Deals</RouterLink>
+        <RouterLink to="/archive">Archive</RouterLink>
         <RouterLink to="/settings">Settings</RouterLink>
       </nav>
       <div class="header-actions">

@@ -81,6 +81,19 @@ export class OrdersController {
     return this.ordersService.unlink(sellOrderId);
   }
 
+  @Get('archive')
+  archived(
+    @Query('exchange') exchange?: string,
+    @Query('instIds') instIds?: string | string[],
+    @Query('side') side?: string,
+  ) {
+    return this.ordersService.listArchive({
+      exchange: parseExchange(exchange),
+      instIds: parseInstIds(instIds),
+      side: side || undefined,
+    });
+  }
+
   @Post(':id/archive')
   archive(@Param('id', ParseIntPipe) id: number) {
     return this.ordersService.archive(id);
@@ -89,6 +102,11 @@ export class OrdersController {
   @Post(':id/unarchive')
   unarchive(@Param('id', ParseIntPipe) id: number) {
     return this.ordersService.unarchive(id);
+  }
+
+  @Delete(':id')
+  remove(@Param('id', ParseIntPipe) id: number) {
+    return this.ordersService.softDelete(id);
   }
 
   @Post(':id/stake')

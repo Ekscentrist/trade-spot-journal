@@ -47,8 +47,6 @@ type OpenBuy = OrderRow & {
 type OpenResponse = {
   buys: OpenBuy[]
   unlinkedSells: OrderRow[]
-  archivedSells: OrderRow[]
-  archivedBuys: OrderRow[]
 }
 
 type MtmRow = {
@@ -129,8 +127,6 @@ function readStoredEntrySort(): EntrySort {
 
 const buys = ref<OpenBuy[]>([])
 const unlinkedSells = ref<OrderRow[]>([])
-const archivedSells = ref<OrderRow[]>([])
-const archivedBuys = ref<OrderRow[]>([])
 const instruments = ref<string[]>([])
 const selectedInstIds = ref<string[]>(readStoredInstIds(exchange.value))
 const status = ref<Status | null>(null)
@@ -138,8 +134,6 @@ const conn = computed(() => status.value?.[exchange.value] ?? null)
 const instrumentsOpen = ref(false)
 const entrySortOpen = ref(false)
 const entrySort = ref<EntrySort>(readStoredEntrySort())
-const showArchivedSells = ref(false)
-const showArchivedBuys = ref(false)
 const error = ref('')
 const message = ref('')
 const loading = ref(false)
@@ -223,8 +217,6 @@ function formatTotal(value: number) {
 function applyOpen(open: OpenResponse) {
   buys.value = open.buys
   unlinkedSells.value = open.unlinkedSells
-  archivedSells.value = open.archivedSells || []
-  archivedBuys.value = open.archivedBuys || []
 }
 
 function entryPriceNum(o: OrderRow) {
@@ -623,23 +615,6 @@ async function confirmTransfer() {
   }
 }
 
-async function unarchive(orderId: number) {
-  loading.value = true
-  error.value = ''
-  message.value = ''
-  try {
-    const res = await api<{ open: OpenResponse }>(`/orders/${orderId}/unarchive`, {
-      method: 'POST',
-    })
-    applyOpen(res.open)
-    message.value = 'Order restored'
-  } catch (e) {
-    error.value = (e as Error).message
-  } finally {
-    loading.value = false
-  }
-}
-
 watch(
   selectedInstIds,
   (value) => {
@@ -890,36 +865,6 @@ onUnmounted(() => {
             </div>
           </div>
         </article>
-
-        <div class="archived-block">
-          <button
-            class="secondary archived-toggle"
-            type="button"
-            @click="showArchivedBuys = !showArchivedBuys"
-          >
-            Archived buys ({{ archivedBuys.length }})
-            <span class="caret">{{ showArchivedBuys ? '▴' : '▾' }}</span>
-          </button>
-          <div v-if="showArchivedBuys">
-            <div v-if="!archivedBuys.length" class="empty">No archived buys</div>
-            <article
-              v-for="buy in archivedBuys"
-              :key="buy.id"
-              class="card archived-card"
-            >
-              <div class="card-top">
-                <span class="badge warn">archived</span>
-                <strong class="coin-link" @click.stop="selectInstrument(buy.instId)">{{ buy.instId }}</strong>
-                <button class="linkish" type="button" @click="unarchive(buy.id)">Restore</button>
-              </div>
-              <div class="meta">
-                <span>Size {{ size(buy) }}</span>
-                <span>Px {{ price(buy) }}</span>
-                <span class="muted">{{ fmt(buy.archivedAt) }}</span>
-              </div>
-            </article>
-          </div>
-        </div>
       </section>
 
       <section class="column">
@@ -950,36 +895,6 @@ onUnmounted(() => {
             <span class="muted">{{ fmt(sell.filledAt) }}</span>
           </div>
         </article>
-
-        <div class="archived-block">
-          <button
-            class="secondary archived-toggle"
-            type="button"
-            @click="showArchivedSells = !showArchivedSells"
-          >
-            Archived sells ({{ archivedSells.length }})
-            <span class="caret">{{ showArchivedSells ? '▴' : '▾' }}</span>
-          </button>
-          <div v-if="showArchivedSells">
-            <div v-if="!archivedSells.length" class="empty">No archived sells</div>
-            <article
-              v-for="sell in archivedSells"
-              :key="sell.id"
-              class="card archived-card"
-            >
-              <div class="card-top">
-                <span class="badge warn">archived</span>
-                <strong class="coin-link" @click.stop="selectInstrument(sell.instId)">{{ sell.instId }}</strong>
-                <button class="linkish" type="button" @click="unarchive(sell.id)">Restore</button>
-              </div>
-              <div class="meta">
-                <span>Size {{ size(sell) }}</span>
-                <span>Px {{ price(sell) }}</span>
-                <span class="muted">{{ fmt(sell.archivedAt) }}</span>
-              </div>
-            </article>
-          </div>
-        </div>
       </section>
     </div>
 
@@ -1310,19 +1225,6 @@ p { margin: 0.2rem 0 0; color: var(--muted); }
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
-}
-.archived-block {
-  margin-top: 1rem;
-}
-.archived-toggle {
-  width: 100%;
-  display: inline-flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.65rem;
-}
-.archived-card {
-  opacity: 0.85;
 }
 .meta {
   display: flex;
