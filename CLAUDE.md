@@ -41,6 +41,7 @@ Production on this host: systemd unit `trade` runs `node dist/main.js` from `/va
 **Per-exchange module layout** (`src/okx`, `src/bitget`, `src/gate`, all parallel):
 - `<ex>.service.ts` — private WS client (`OnModuleInit` connect, ping, 5s auto-reconnect, `getStatus()`, `reconnect()` called by SettingsController after credentials change). It normalizes exchange messages into the OKX-shaped `FillPayload` (`src/orders/orders.service.ts`): `instId` is always `BASE-QUOTE` (e.g. Bitget `BTCUSDT` -> `BTC-USDT`), `state` is OKX-style (`filled`/`partially_filled`/...). It calls `OrdersService.upsertFill()`, then sends Telegram and `markNotified()`. Messages are processed serially through a promise chain.
 - `<ex>-rest.ts` — signed REST helper (HMAC), amount formatting/dust helpers.
+- `bitget-fee.ts` / `gate-fee.ts` (with specs) — fee extraction is non-trivial: Bitget may report fees only in `feeDetail` (JSON rows), Gate splits them across `fee`/`fee_currency`, `gt_fee` (paid in GT) and `point_fee`. Change fee parsing there, not inline in the WS service.
 - `<ex>-earn-fund.service.ts` + `<ex>-earn.controller.ts` in a separate `<ex>-earn.module.ts` — Spot↔Earn transfers (OKX Simple Earn, Bitget Flexible Savings, Gate Uni Earn) and the USDT/USDC stables panel. Earn modules deliberately do **not** depend on OrdersModule (OrdersModule imports them), avoiding cycles; WS modules use `forwardRef` for Settings/Orders/Telegram.
 
 **OrdersService (`src/orders/orders.service.ts`) is the domain core:**
@@ -49,9 +50,10 @@ Production on this host: systemd unit `trade` runs `node dist/main.js` from `/va
 - `maybeCloseBuy`: when linked sells cover ≥ `CLOSE_THRESHOLD` (0.99) of the buy, a `Deal` is created in a transaction and `dealId` is set on the buy and its sells. Orders with `dealId` are immutable for link/stake/move operations.
 - `stakedAt` hides a buy from Open into Staking (still MTM-valued); stake/unstake then calls `moveEarnForBuy` to move the remaining base size to/from Earn. Earn failures only notify Telegram — the DB flag is never rolled back.
 - `changeExchange` moves a buy plus its open linked sells to another exchange (unstaking first if needed, checking ordId conflicts).
+- Archive lifecycle: `archivedAt` removes an unlinked, unstaked, non-deal order from Open into Archive (`GET /orders/archive`, `POST :id/archive|unarchive`). `DELETE /orders/:id` is a soft delete (`deletedAt`), allowed only on archived non-deal orders; deleted orders are excluded from every list and `upsertFill` never notifies them (fills still upsert, so the row is not recreated).
 - Mutating endpoints return refreshed `open`/`staking` lists so the admin can re-render without refetching.
 
-**Numbers are strings.** Prices/sizes/fees are stored as `VarChar` strings; all math lives in `src/orders/trade-math.ts` (`parseNum`, `orderSize`, `orderPrice`, `feeInQuote`, `calcRoundTrip`, `formatNum`, `cleanDecimal` which strips binary-float noise). Fees in the base currency are converted to quote at trade price. This file has the unit tests (`trade-math.spec.ts`).
+**Numbers are strings.** Prices/sizes/fees are stored as `VarChar` strings; all math lives in `src/orders/trade-math.ts` (`parseNum`, `orderSize`, `orderPrice`, `feeInQuote`, `calcRoundTrip`, `formatNum`, `cleanDecimal` which strips binary-float noise). Fees in the base currency are converted to quote at trade price. Unit tests: `trade-math.spec.ts` plus the fee-parser specs. The admin mirrors parts of this client-side in `admin/src/num.ts` and `admin/src/stables.ts` (stablecoin spent/received per order, shown on Orders and Archive).
 
 **MTM prices** come from public ticker REST per exchange (`src/orders/tickers.ts` dispatches).
 
@@ -59,7 +61,7 @@ Production on this host: systemd unit `trade` runs `node dist/main.js` from `/va
 
 **Auth.** Single admin login -> JWT (`src/auth`); controllers use `JwtAuthGuard`. Global `ValidationPipe({ whitelist, transform })` — DTOs with class-validator are required for request bodies or fields are stripped.
 
-**Admin SPA** (`admin/src`): `api.ts` fetch wrapper (token in localStorage `trade_token`, 401 -> /login), views `OrdersView` (open buys/sells, drag-and-drop linking, Earn panel, transfer modal), `StakingView`, `DealsView`, `SettingsView`. Selected exchange is a header switcher passed as `?exchange=` to the API.
+**Admin SPA** (`admin/src`): `api.ts` fetch wrapper (token in localStorage `trade_token`, 401 -> /login), views `OrdersView` (open buys/sells, drag-and-drop linking, Earn panel, transfer modal), `StakingView`, `DealsView`, `ArchiveView` (single list, restore/delete), `SettingsView`. Selected exchange is a header switcher passed as `?exchange=` to the API.
 
 ## Conventions
 
