@@ -9,6 +9,7 @@ import {
   exchangeQuery,
 } from '../exchange'
 import { prettyNum } from '../num'
+import { buySpent, fmtQuote, quoteOf, sellReceived } from '../stables'
 
 type OrderRow = {
   id: number
@@ -163,6 +164,16 @@ function entryPriceNum(o: OrderRow) {
 
 function price(o: OrderRow) {
   return prettyNum(o.avgPx || o.fillPx || o.px)
+}
+
+function spentLabel(o: OrderRow) {
+  const q = quoteOf(o.instId)
+  return fmtQuote(buySpent(o, q), q)
+}
+
+function receivedLabel(o: OrderRow) {
+  const q = quoteOf(o.instId)
+  return fmtQuote(sellReceived(o, q), q)
 }
 
 function size(o: OrderRow) {
@@ -515,6 +526,7 @@ onUnmounted(() => {
       <div class="meta">
         <span>Size {{ size(buy) }}</span>
         <span>Px {{ price(buy) }}</span>
+        <span>Cost <span class="neg">{{ spentLabel(buy) }}</span></span>
         <span v-if="buy.lastPx">Now {{ buy.lastPx }}</span>
         <span>Fee {{ feeLabel(buy) }}</span>
       </div>
@@ -534,6 +546,7 @@ onUnmounted(() => {
         <div v-for="sell in buy.matchedSells" :key="sell.id" class="nested-row">
           <span class="badge sell">sell</span>
           <span>{{ size(sell) }} @ {{ price(sell) }}</span>
+          <span class="pos">→ {{ receivedLabel(sell) }}</span>
           <span class="muted">{{ fmt(sell.filledAt) }}</span>
         </div>
       </div>

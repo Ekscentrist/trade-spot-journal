@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from '../api'
 import { exchange, exchangeQuery } from '../exchange'
 import { prettyNum } from '../num'
+import { buySpent, fmtQuote, quoteOf, sellReceived } from '../stables'
 
 type Deal = {
   id: number
@@ -106,6 +107,37 @@ function sellTotal(order: Deal['orders'][number], quoteCcy: string | null) {
   if (!Number.isFinite(sz) || !Number.isFinite(px)) return '—'
   const val = (sz * px).toFixed(6).replace(/\.?0+$/, '')
   return `${val} ${quoteCcy || ''}`.trim()
+}
+
+function dealQuote(deal: Deal) {
+  return deal.quoteCcy || quoteOf(deal.instId)
+}
+
+function dealSpent(deal: Deal) {
+  const q = dealQuote(deal)
+  return fmtQuote(
+    buySpent(
+      { accFillSz: deal.buySz, avgPx: deal.buyAvgPx, fee: deal.buyFee, feeCcy: deal.buyFeeCcy },
+      q,
+    ),
+    q,
+  )
+}
+
+function dealReceived(deal: Deal) {
+  const q = dealQuote(deal)
+  let total = 0
+  for (const o of deal.orders) {
+    const v = sellReceived(o, q)
+    if (v == null) return '—'
+    total += v
+  }
+  return deal.orders.length ? fmtQuote(total, q) : '—'
+}
+
+function sellNet(order: Deal['orders'][number], deal: Deal) {
+  const q = dealQuote(deal)
+  return fmtQuote(sellReceived(order, q), q)
 }
 
 const selectedLabel = computed(() => {
@@ -288,8 +320,16 @@ onUnmounted(() => {
           <tr v-for="d in deals" :key="d.id">
             <td>{{ fmt(d.closedAt) }}</td>
             <td><strong class="coin-link" @click.stop="selectInstrument(d.instId)">{{ d.instId }}</strong></td>
-            <td>{{ d.buySz }} @ {{ d.buyAvgPx }}</td>
-            <td>{{ d.sellSz }} @ {{ d.sellAvgPx }}</td>
+            <td>
+              {{ d.buySz }} @ {{ d.buyAvgPx }}
+              <br />
+              <span class="muted">spent</span> <span class="neg">{{ dealSpent(d) }}</span>
+            </td>
+            <td>
+              {{ d.sellSz }} @ {{ d.sellAvgPx }}
+              <br />
+              <span class="muted">got</span> <span class="pos">{{ dealReceived(d) }}</span>
+            </td>
             <td>
               buy {{ d.buyFee ? `${d.buyFee} ${d.buyFeeCcy || ''}`.trim() : '—' }}
               <br />
@@ -338,6 +378,7 @@ onUnmounted(() => {
           <div class="modal-summary-item">
             <span class="muted">Buy Order</span>
             <strong>{{ activeDealModal.buySz }} @ {{ activeDealModal.buyAvgPx }}</strong>
+            <span class="summary-sub">Spent: <span class="neg">{{ dealSpent(activeDealModal) }}</span></span>
             <span class="summary-sub">
               Fee: {{ activeDealModal.buyFee ? `${activeDealModal.buyFee} ${activeDealModal.buyFeeCcy || ''}`.trim() : '—' }}
             </span>
@@ -345,6 +386,7 @@ onUnmounted(() => {
           <div class="modal-summary-item">
             <span class="muted">Total Sells</span>
             <strong>{{ activeDealModal.sellSz }} @ {{ activeDealModal.sellAvgPx }}</strong>
+            <span class="summary-sub">Received: <span class="pos">{{ dealReceived(activeDealModal) }}</span></span>
             <span class="summary-sub">
               Fee: {{ activeDealModal.sellFee ? `${activeDealModal.sellFee} ${activeDealModal.sellFeeCcy || ''}`.trim() : '—' }}
             </span>
@@ -373,8 +415,9 @@ onUnmounted(() => {
                 <th>Filled At</th>
                 <th>Size</th>
                 <th>Price</th>
-                <th>Total</th>
+                <th>Gross</th>
                 <th>Fee</th>
+                <th>Received</th>
                 <th>Order ID</th>
               </tr>
             </thead>
@@ -386,10 +429,11 @@ onUnmounted(() => {
                 <td>{{ sellPrice(sell) }}</td>
                 <td>{{ sellTotal(sell, activeDealModal.quoteCcy) }}</td>
                 <td>{{ sell.fee ? `${prettyNum(sell.fee)} ${sell.feeCcy || ''}`.trim() : '—' }}</td>
+                <td><strong class="pos">{{ sellNet(sell, activeDealModal) }}</strong></td>
                 <td><code class="ord-id" :title="sell.ordId">{{ sell.ordId }}</code></td>
               </tr>
               <tr v-if="!activeDealModal.orders.length">
-                <td colspan="7" class="empty">No sell orders found</td>
+                <td colspan="8" class="empty">No sell orders found</td>
               </tr>
             </tbody>
           </table>
